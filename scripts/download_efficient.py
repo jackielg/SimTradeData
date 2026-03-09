@@ -562,29 +562,36 @@ def download_all_data(
                 for i in range(0, len(stock_pool), BATCH_SIZE)
             ]
 
-            # Check if data is already up to date by checking global MAX(date)
+            # Check if data is already up to date
+            # Only skip if ALL stocks have been covered AND there are no new trading days
             check_table = "valuation" if valuation_only else "stocks"
-            global_max_date = downloader.writer.get_max_date(check_table)
             skip_stock_download = False
 
-            if global_max_date:
-                # Use a sample stock to check if there's new data
-                test_start = (datetime.strptime(global_max_date, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
-                if test_start > end_date_str:
-                    print(f"\n{check_table.capitalize()} data already up to date (max_date: {global_max_date})")
-                    skip_stock_download = True
-                else:
-                    # Try fetching a sample stock to see if there's new data
-                    try:
-                        test_df = downloader.unified_fetcher.fetch_unified_daily_data(
-                            "000001.SZ", test_start, end_date_str
-                        )
-                        if test_df.empty:
-                            print(f"\n{check_table.capitalize()} data already up to date (max_date: {global_max_date})")
-                            print("No new trading days since last update, skipping stock download.")
-                            skip_stock_download = True
-                    except Exception:
-                        pass  # If check fails, proceed with download
+            # Count how many stocks in pool are missing from the target table
+            existing_symbols = set(downloader.writer.get_existing_stocks(check_table))
+            missing_count = len([s for s in stock_pool if s not in existing_symbols])
+
+            if missing_count > 0:
+                print(f"\n{missing_count} stocks missing from {check_table} table, will download")
+            else:
+                # All stocks exist, check if there are new trading days
+                global_max_date = downloader.writer.get_max_date(check_table)
+                if global_max_date:
+                    test_start = (datetime.strptime(global_max_date, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+                    if test_start > end_date_str:
+                        print(f"\n{check_table.capitalize()} data already up to date (max_date: {global_max_date})")
+                        skip_stock_download = True
+                    else:
+                        try:
+                            test_df = downloader.unified_fetcher.fetch_unified_daily_data(
+                                "000001.SZ", test_start, end_date_str
+                            )
+                            if test_df.empty:
+                                print(f"\n{check_table.capitalize()} data already up to date (max_date: {global_max_date})")
+                                print("No new trading days since last update, skipping stock download.")
+                                skip_stock_download = True
+                        except Exception:
+                            pass  # If check fails, proceed with download
 
             if skip_stock_download:
                 all_metadata = []

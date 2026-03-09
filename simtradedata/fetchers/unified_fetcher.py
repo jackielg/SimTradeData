@@ -7,6 +7,7 @@ in a single API call, reducing redundant queries.
 
 import logging
 import platform
+import time
 
 import baostock as bs
 import pandas as pd
@@ -16,6 +17,13 @@ from simtradedata.utils.code_utils import convert_from_ptrade_code
 from simtradedata.config.field_mappings import MARKET_FIELD_MAP
 
 logger = logging.getLogger(__name__)
+
+# Retryable BaoStock server errors (Chinese messages from baostock server)
+_RETRYABLE_ERRORS = ["接收数据异常", "网络异常", "超时"]
+
+# Max retries for transient errors
+MAX_API_RETRIES = 3
+RETRY_BASE_DELAY = 5  # seconds, exponential backoff: 5, 10, 20
 
 # Check if signal.alarm is available (Unix-like systems only)
 IS_POSIX = platform.system() != 'Windows'
@@ -159,44 +167,76 @@ class UnifiedDataFetcher(BaoStockFetcher):
                 adjustflag=adjustflag,
             )
 
-        # Execute with 60 second timeout (cross-platform)
-        try:
-            rs = _run_with_timeout(
-                api_call,
-                60,
-                f"BaoStock API timeout for {symbol}"
-            )
-        except TimeoutError:
-            logger.error(f"Timeout fetching {symbol}, skipping")
-            raise
+        # Retry loop for transient errors (timeout, server errors, encoding)
+        last_error = None
+        for attempt in range(MAX_API_RETRIES):
+            try:
+                rs = _run_with_timeout(
+                    api_call,
+                    60,
+                    f"BaoStock API timeout for {symbol}"
+                )
+            except TimeoutError:
+                last_error = TimeoutError(f"Timeout fetching {symbol}")
+                delay = RETRY_BASE_DELAY * (2 ** attempt)
+                logger.warning(
+                    f"Timeout for {symbol} (attempt {attempt + 1}/{MAX_API_RETRIES}), "
+                    f"retrying in {delay}s..."
+                )
+                time.sleep(delay)
+                continue
 
-        # Check for login expiration and retry once
-        if rs.error_code != "0":
-            if "未登录" in rs.error_msg or "登录" in rs.error_msg:
-                # Session expired, re-login and retry
-                logger.warning(f"BaoStock session expired, re-logging in...")
-                from simtradedata.fetchers.baostock_fetcher import BaoStockFetcher
-                BaoStockFetcher._bs_logged_in = False  # Reset login state
-                BaoStockFetcher._ensure_login()  # Re-login
-
-                # Retry the API call
-                try:
-                    rs = _run_with_timeout(
-                        api_call,
-                        60,
-                        f"BaoStock API timeout for {symbol} (retry)"
-                    )
-                except TimeoutError:
-                    logger.error(f"Timeout fetching {symbol} (retry), skipping")
-                    raise
-
-            # Check error again after potential retry
+            # Check for login expiration
             if rs.error_code != "0":
+                if "未登录" in rs.error_msg or "登录" in rs.error_msg:
+                    logger.warning("BaoStock session expired, re-login...")
+                    BaoStockFetcher._bs_logged_in = False
+                    BaoStockFetcher._ensure_login()
+                    continue  # retry with fresh session
+
+                # Check for retryable server errors
+                if any(err in rs.error_msg for err in _RETRYABLE_ERRORS):
+                    delay = RETRY_BASE_DELAY * (2 ** attempt)
+                    logger.warning(
+                        f"Server error for {symbol}: {rs.error_msg} "
+                        f"(attempt {attempt + 1}/{MAX_API_RETRIES}), "
+                        f"retrying in {delay}s..."
+                    )
+                    last_error = RuntimeError(
+                        f"Server error for {symbol}: {rs.error_msg}"
+                    )
+                    time.sleep(delay)
+                    continue
+
+                # Non-retryable error
                 raise RuntimeError(
                     f"Failed to query unified data for {symbol}: {rs.error_msg}"
                 )
-        
-        df = rs.get_data()
+
+            # API call succeeded, try to parse data
+            try:
+                df = rs.get_data()
+            except UnicodeDecodeError as e:
+                delay = RETRY_BASE_DELAY * (2 ** attempt)
+                logger.warning(
+                    f"Encoding error for {symbol}: {e} "
+                    f"(attempt {attempt + 1}/{MAX_API_RETRIES}), "
+                    f"retrying in {delay}s..."
+                )
+                last_error = e
+                time.sleep(delay)
+                continue
+
+            # Success - break out of retry loop
+            break
+        else:
+            # All retries exhausted
+            if last_error:
+                logger.error(
+                    f"All {MAX_API_RETRIES} attempts failed for {symbol}: {last_error}"
+                )
+                raise last_error
+            raise RuntimeError(f"All retries failed for {symbol}")
 
         if df.empty:
             logger.info(f"No unified data for {symbol} (may be delisted or no trading)")
