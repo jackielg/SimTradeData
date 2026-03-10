@@ -107,6 +107,13 @@ A single command downloads all data, automatically orchestrating Mootdx and BaoS
 # BaoStock: valuation metrics, ST/suspension status, index constituents
 poetry run python scripts/download.py
 
+# Fast first-time download: import TDX daily package first, then supplement with adjustment factors etc.
+# (6,000+ stocks OHLCV reduced from hours to minutes)
+poetry run python scripts/download.py --tdx-download --source mootdx --skip-fundamentals
+
+# Use an already-downloaded TDX ZIP file
+poetry run python scripts/download.py --tdx-source data/downloads/hsjday.zip --source mootdx
+
 # Check data status
 poetry run python scripts/download.py --status
 
@@ -124,7 +131,8 @@ poetry run python scripts/download.py --source baostock
 
 | Data Type | Source | Reason |
 |-----------|--------|--------|
-| OHLCV Market Data | Mootdx | Fast, local network |
+| OHLCV Market Data (first time) | TDX Daily Package | Fastest, ~500MB bulk import of full history |
+| OHLCV Market Data (incremental) | Mootdx | Fast, local network |
 | Adjustment Factors | Mootdx | Downloaded with market data |
 | Corporate Actions (XDXR) | Mootdx | More complete data |
 | Bulk Financial Data | Mootdx | One ZIP = all stocks, far better than per-stock queries |
@@ -338,6 +346,14 @@ Step 1 automatically detects the latest date of existing data in DuckDB and only
 
 ## Version History
 
+### v1.1.0 (2026-03-10) - TDX Fast Import Integration
+- Added `--tdx-download` flag: auto-download TDX official daily data package and import
+- Added `--tdx-source` flag: import TDX daily data from local ZIP file or directory
+- First-time download of 6,000+ stocks OHLCV reduced from hours to minutes
+- TDX import runs as Phase 0 before Mootdx phase
+- Fixed adjust factors and XDXR not being downloaded after TDX bulk import
+- Adjust factors and XDXR now check per-symbol existence independently of OHLCV incremental logic
+
 ### v0.6.0 (2026-02-08) - US Stock Support
 - Added yfinance data source supporting 6,000+ US common stocks
 - US stock ticker format `AAPL.US`, consistent with A-shares `{code}.{market}`
@@ -393,4 +409,4 @@ This project is licensed under AGPL-3.0. See the [LICENSE](LICENSE) file for det
 
 ---
 
-**Status**: Production Ready | **Version**: v0.6.0 | **Last Updated**: 2026-02-08
+**Status**: Production Ready | **Version**: v1.1.0 | **Last Updated**: 2026-03-10

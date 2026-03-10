@@ -3,7 +3,8 @@
 Unified data download entry point for SimTradeData
 
 This script orchestrates downloads from multiple data sources:
-- Phase 1: Mootdx - OHLCV, adjust factors, XDXR, batch financials, calendar, benchmark
+- Phase 0 (optional): TDX bulk import - fast OHLCV from local TDX .day files
+- Phase 1: Mootdx - OHLCV (incremental), adjust factors, XDXR, batch financials, calendar, benchmark
 - Phase 2: BaoStock - Valuation (PE/PB/PS/PCF/turnover), ST/HALT status, index constituents
 
 Each source only downloads data it's best suited for, avoiding redundancy.
@@ -68,7 +69,107 @@ def print_data_status(db_path: str = DEFAULT_DB_PATH) -> None:
         writer.close()
 
 
-def run_mootdx_download(skip_fundamentals: bool = False, download_dir: str | None = None) -> bool:
+def run_tdx_import(source_path: str, db_path: str = DEFAULT_DB_PATH) -> bool:
+    """Run Phase 0: TDX bulk OHLCV import from local .day files.
+
+    Args:
+        source_path: Path to ZIP file or extracted directory.
+        db_path: Path to DuckDB database.
+
+    Returns:
+        True if import succeeded.
+    """
+    print("\n" + "=" * 70)
+    print("Phase 0: TDX Bulk OHLCV Import")
+    print("  - Import daily OHLCV from TDX .day files (fast, local)")
+    print(f"  - Source: {source_path}")
+    print("=" * 70)
+
+    try:
+        from import_tdx_day import TdxDayImporter
+
+        path = Path(source_path)
+        if not path.exists():
+            print(f"Error: TDX source not found: {source_path}")
+            return False
+
+        importer = TdxDayImporter(db_path=db_path)
+        try:
+            stats = importer.import_from_source(path)
+
+            print()
+            print(f"  Files processed: {stats['files_processed']}")
+            print(f"  Files skipped:   {stats['files_skipped']}")
+            print(f"  Records imported: {stats['records_imported']}")
+            if stats["records_backfilled"] > 0:
+                print(f"    Backfilled (historical): {stats['records_backfilled']}")
+            return True
+        finally:
+            importer.close()
+
+    except Exception as e:
+        print(f"Error in TDX import: {e}")
+        return False
+
+
+def run_tdx_download_and_import(db_path: str = DEFAULT_DB_PATH) -> bool:
+    """Download hsjday.zip from TDX website and import.
+
+    Returns:
+        True if download and import succeeded.
+    """
+    print("\n" + "=" * 70)
+    print("Phase 0: TDX Download & Import")
+    print("  - Download hsjday.zip from data.tdx.com.cn")
+    print("  - Import daily OHLCV from TDX .day files")
+    print("=" * 70)
+
+    try:
+        from download_tdx_day import (
+            DOWNLOAD_DIR,
+            DOWNLOAD_URL,
+            download_file,
+            get_remote_file_info,
+            needs_update,
+        )
+        from import_tdx_day import TdxDayImporter
+
+        zip_path = DOWNLOAD_DIR / "hsjday.zip"
+
+        print("\nChecking remote file...")
+        remote_info = get_remote_file_info(DOWNLOAD_URL)
+        if remote_info.get("size"):
+            print(f"  Remote size: {remote_info['size'] / 1024 / 1024:.1f} MB")
+
+        if needs_update(zip_path, remote_info):
+            print("\nDownloading hsjday.zip...")
+            if not download_file(DOWNLOAD_URL, zip_path):
+                return False
+            print(f"Downloaded to: {zip_path}")
+        else:
+            print("Local file is up to date, skipping download.")
+
+        # Import
+        print("\nImporting data...")
+        importer = TdxDayImporter(db_path=db_path)
+        try:
+            stats = importer.import_from_source(zip_path)
+            print(f"  Files processed: {stats['files_processed']}")
+            print(f"  Records imported: {stats['records_imported']}")
+            return True
+        finally:
+            importer.close()
+
+    except Exception as e:
+        print(f"Error in TDX download & import: {e}")
+        return False
+
+
+def run_mootdx_download(
+    skip_fundamentals: bool = False,
+    download_dir: str | None = None,
+    refresh_fundamentals: bool = False,
+) -> bool:
     """Run Mootdx download phase."""
     print("\n" + "=" * 70)
     print("Phase 1: Mootdx Data Download")
@@ -86,6 +187,7 @@ def run_mootdx_download(skip_fundamentals: bool = False, download_dir: str | Non
         mootdx_download(
             skip_fundamentals=skip_fundamentals,
             download_dir=download_dir,
+            refresh_fundamentals=refresh_fundamentals,
         )
         return True
     except Exception as e:
@@ -134,6 +236,8 @@ Examples:
   poetry run python scripts/download.py --source mootdx    # Mootdx only
   poetry run python scripts/download.py --source baostock  # BaoStock only
   poetry run python scripts/download.py --skip-fundamentals
+  poetry run python scripts/download.py --tdx-source data/downloads/hsjday.zip --source mootdx
+  poetry run python scripts/download.py --tdx-download --source mootdx
 """
     )
 
@@ -165,6 +269,25 @@ Examples:
         action="store_true",
         help="Run BaoStock in full mode instead of valuation-only mode",
     )
+    parser.add_argument(
+        "--refresh-fundamentals",
+        action="store_true",
+        help="Force re-download all financial data quarters",
+    )
+
+    # TDX import options (mutually exclusive)
+    tdx_group = parser.add_mutually_exclusive_group()
+    tdx_group.add_argument(
+        "--tdx-source",
+        type=str,
+        default=None,
+        help="Import TDX .day files from ZIP or directory before mootdx download",
+    )
+    tdx_group.add_argument(
+        "--tdx-download",
+        action="store_true",
+        help="Auto-download hsjday.zip from TDX website and import before mootdx download",
+    )
 
     args = parser.parse_args()
 
@@ -177,17 +300,28 @@ Examples:
     print("SimTradeData Unified Download")
     print("=" * 70)
     print("\nData source responsibilities:")
-    print("  Mootdx:   OHLCV, adjust factors, XDXR, batch financials, calendar, benchmark")
+    if args.tdx_source or args.tdx_download:
+        print("  TDX:      OHLCV bulk import (fast, from .day files)")
+    print("  Mootdx:   OHLCV (incremental), adjust factors, XDXR, batch financials, calendar, benchmark")
     print("  BaoStock: Valuation (PE/PB/PS/PCF/turnover), ST/HALT status, index constituents")
     print("=" * 70)
 
     success = True
+
+    # Phase 0: TDX import (optional)
+    if args.tdx_source:
+        if not run_tdx_import(args.tdx_source):
+            success = False
+    elif args.tdx_download:
+        if not run_tdx_download_and_import():
+            success = False
 
     # Phase 1: Mootdx
     if args.source in ["mootdx", "all"]:
         if not run_mootdx_download(
             skip_fundamentals=args.skip_fundamentals,
             download_dir=args.download_dir,
+            refresh_fundamentals=args.refresh_fundamentals,
         ):
             success = False
 

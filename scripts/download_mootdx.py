@@ -123,69 +123,74 @@ class MootdxDownloader:
         """
         Download daily OHLCV + adjust factor + XDXR for a single stock.
 
+        OHLCV uses incremental logic (skip if up to date).
+        Adjust factor and XDXR are downloaded if missing for the symbol,
+        even when OHLCV is already current (e.g. after TDX bulk import).
+
         Returns:
-            True if data was downloaded, False if skipped/failed
+            True if any data was downloaded, False if all skipped/failed
         """
         try:
-            # Auto-incremental
+            downloaded = False
+
+            # --- OHLCV: incremental ---
             actual_start = self.get_incremental_start_date(symbol)
-            if actual_start > start_date:
-                start_date = actual_start
+            ohlcv_start = max(actual_start, start_date)
 
-            if start_date > end_date:
-                return False  # Already up to date
-
-            # Fetch daily bars
-            df = self.unified_fetcher.fetch_daily_data(symbol, start_date, end_date)
-
-            if df.empty:
-                logger.warning(f"No data for {symbol}")
-                return False
-
-            # Filter out empty rows (halted stocks return rows with all NaN)
-            price_cols = ["open", "high", "low", "close"]
-            available_cols = [c for c in price_cols if c in df.columns]
-            if available_cols:
-                df = df.dropna(subset=available_cols, how="all")
-                if df.empty:
-                    logger.warning(f"No valid data for {symbol} (all rows empty)")
-                    return False
-
-            # Write market data (set date as index)
-            if "date" in df.columns:
-                market_df = df.set_index("date")
-            else:
-                market_df = df
-
-            # Rename amount -> money if needed
-            if "amount" in market_df.columns:
-                market_df = market_df.rename(columns={"amount": "money"})
-
-            self.writer.write_market_data(symbol, market_df)
-
-            # Fetch and write adjust factor
-            try:
-                adj_df = self.unified_fetcher.fetch_adjust_factor(
-                    symbol, start_date, end_date
+            if ohlcv_start <= end_date:
+                df = self.unified_fetcher.fetch_daily_data(
+                    symbol, ohlcv_start, end_date
                 )
-                if not adj_df.empty:
-                    adj_series = adj_df.set_index("date")["backAdjustFactor"]
-                    self.writer.write_adjust_factor(symbol, adj_series)
-            except Exception as e:
-                logger.warning(f"Failed to fetch adjust factor for {symbol}: {e}")
 
-            # Fetch and write XDXR data
-            try:
-                xdxr_df = self.unified_fetcher.fetch_xdxr(symbol)
-                if not xdxr_df.empty:
-                    # Convert XDXR to exrights format if possible
-                    exrights = self._convert_xdxr_to_exrights(xdxr_df)
-                    if not exrights.empty:
-                        self.writer.write_exrights(symbol, exrights)
-            except Exception as e:
-                logger.warning(f"Failed to fetch XDXR for {symbol}: {e}")
+                if not df.empty:
+                    # Filter out empty rows (halted stocks return rows with all NaN)
+                    price_cols = ["open", "high", "low", "close"]
+                    available_cols = [c for c in price_cols if c in df.columns]
+                    if available_cols:
+                        df = df.dropna(subset=available_cols, how="all")
 
-            return True
+                    if not df.empty:
+                        if "date" in df.columns:
+                            market_df = df.set_index("date")
+                        else:
+                            market_df = df
+
+                        if "amount" in market_df.columns:
+                            market_df = market_df.rename(
+                                columns={"amount": "money"}
+                            )
+
+                        self.writer.write_market_data(symbol, market_df)
+                        downloaded = True
+
+            # --- Adjust factor: download if missing for this symbol ---
+            if not self.writer.get_max_date("adjust_factors", symbol):
+                try:
+                    adj_df = self.unified_fetcher.fetch_adjust_factor(
+                        symbol, start_date, end_date
+                    )
+                    if not adj_df.empty:
+                        adj_series = adj_df.set_index("date")["backAdjustFactor"]
+                        self.writer.write_adjust_factor(symbol, adj_series)
+                        downloaded = True
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to fetch adjust factor for {symbol}: {e}"
+                    )
+
+            # --- XDXR: download if missing for this symbol ---
+            if not self.writer.get_max_date("exrights", symbol):
+                try:
+                    xdxr_df = self.unified_fetcher.fetch_xdxr(symbol)
+                    if not xdxr_df.empty:
+                        exrights = self._convert_xdxr_to_exrights(xdxr_df)
+                        if not exrights.empty:
+                            self.writer.write_exrights(symbol, exrights)
+                            downloaded = True
+                except Exception as e:
+                    logger.warning(f"Failed to fetch XDXR for {symbol}: {e}")
+
+            return downloaded
 
         except Exception as e:
             logger.error(f"Failed to download {symbol}: {e}")
@@ -273,17 +278,28 @@ class MootdxDownloader:
 
         return success_count
 
+    # Number of recent quarters to always re-download (reports may still be
+    # updated, and TDX server hashes are unreliable across distributed nodes)
+    RECENT_QUARTERS_TO_REFRESH = 4
+
     def download_fundamentals_batch(
-        self, start_date: str, end_date: str
+        self, start_date: str, end_date: str,
+        refresh: bool = False,
     ) -> None:
         """
-        Download batch financial data by quarter with hash-based incremental updates.
+        Download batch financial data by quarter with incremental updates.
 
         Uses Affair API which downloads one ZIP per quarter containing
         all stocks' data - much more efficient than per-stock queries.
 
-        Hash verification: Compares remote file hash with stored hash to detect
-        updates. If hash differs, deletes old data and re-downloads.
+        Incremental strategy:
+        - Recent quarters (last RECENT_QUARTERS_TO_REFRESH): always re-download
+          because financial reports may be updated after initial publication.
+        - Historical quarters: skip if already completed.
+        - refresh=True: force re-download all quarters.
+
+        TDX server hashes are NOT used for change detection because distributed
+        TDX servers return inconsistent hashes for the same file.
         """
         from simtradedata.fetchers.mootdx_affair_fetcher import MootdxAffairFetcher
         from simtradedata.utils.ttm_calculator import get_quarters_in_range
@@ -293,16 +309,19 @@ class MootdxDownloader:
             print("  No quarters in date range")
             return
 
-        # Create affair fetcher for hash lookups (same download dir as unified_fetcher)
+        # Create affair fetcher (same download dir as unified_fetcher)
         affair_fetcher = MootdxAffairFetcher(download_dir=self.download_dir)
 
         print(f"  Total quarters: {len(quarters)}")
-        print("  Checking for incremental updates...")
+        if refresh:
+            print("  Mode: refresh (re-download all quarters)")
+        else:
+            print(f"  Mode: incremental (refresh last {self.RECENT_QUARTERS_TO_REFRESH} quarters)")
 
-        # Get already completed quarters (may not have hash if downloaded with old code)
+        # Get already completed quarters
         completed_quarters = self.writer.get_completed_fundamental_quarters()
 
-        # Batch fetch remote file info (one API call instead of N)
+        # Batch fetch remote file info (for availability check)
         try:
             remote_files = affair_fetcher.list_available_reports()
             remote_hash_map = {f.get("filename"): f.get("hash") for f in remote_files}
@@ -310,56 +329,47 @@ class MootdxDownloader:
             logger.warning(f"Failed to fetch remote file list: {e}")
             remote_hash_map = {}
 
+        # Determine which recent quarters should always be refreshed
+        recent_quarters = set(quarters[-self.RECENT_QUARTERS_TO_REFRESH:])
+
         pending = []
         skipped = 0
 
         for year, quarter in quarters:
             filename = affair_fetcher.get_quarter_filename(year, quarter)
             remote_hash = remote_hash_map.get(filename)
-            local_hash = self.writer.get_fundamental_quarter_hash(year, quarter)
 
             if remote_hash is None:
                 # File not available on server
                 logger.info(f"File {filename} not available on TDX server")
                 continue
 
-            # If already completed and hash matches (or no local hash recorded), skip
-            if (year, quarter) in completed_quarters:
-                if local_hash is None:
-                    # Old record without hash - trust it as complete
-                    skipped += 1
-                    logger.debug(f"Quarter {year}Q{quarter} already completed (no hash)")
-                    continue
-                elif local_hash == remote_hash:
-                    # Hash match, skip
-                    skipped += 1
-                    logger.debug(f"Hash match for {year}Q{quarter}, skipping")
-                    continue
-                else:
-                    # Hash differs, need to re-download
-                    print(f"    {year}Q{quarter}: hash changed, will re-download")
-                    logger.info(
-                        f"Hash changed for {year}Q{quarter}: {local_hash} -> {remote_hash}"
-                    )
+            if refresh:
+                # Refresh mode: re-download everything
+                pending.append((year, quarter, filename, remote_hash))
+                continue
 
+            is_recent = (year, quarter) in recent_quarters
+            is_completed = (year, quarter) in completed_quarters
+
+            if is_completed and not is_recent:
+                # Historical completed quarter: skip
+                skipped += 1
+                continue
+
+            # New quarter or recent quarter: download
             pending.append((year, quarter, filename, remote_hash))
 
         if not pending:
-            print(f"  All {len(quarters)} quarters up-to-date (hash verified)")
+            print(f"  All {len(quarters)} quarters up-to-date ({skipped} completed)")
             return
 
         print(
-            f"  Pending: {len(pending)}, skipped (hash match): {skipped}"
+            f"  Pending: {len(pending)} (recent: {len(recent_quarters)}), skipped: {skipped}"
         )
 
         for qi, (year, quarter, filename, remote_hash) in enumerate(pending, 1):
             print(f"\n  Quarter {qi}/{len(pending)}: {year}Q{quarter}")
-
-            # Check if we need to delete old data first
-            old_hash = self.writer.get_fundamental_quarter_hash(year, quarter)
-            if old_hash is not None:
-                deleted = self.writer.delete_fundamental_quarter_data(year, quarter)
-                print(f"    Deleted {deleted} old records (hash changed)")
 
             try:
                 fund_df = self.unified_fetcher.fetch_fundamentals_for_quarter(
@@ -375,7 +385,8 @@ class MootdxDownloader:
                     )
                     continue
 
-                # Write per-stock fundamentals
+                # Write per-stock fundamentals (INSERT OR REPLACE overwrites
+                # existing records safely, no need to delete old data first)
                 success_count = 0
                 if "code" in fund_df.columns:
                     self.writer.begin()
@@ -408,7 +419,7 @@ class MootdxDownloader:
                             filename=filename, file_hash=remote_hash or ""
                         )
                         self.writer.commit()
-                        print(f"    Completed: {success_count} stocks (hash: {remote_hash[:8]}...)")
+                        print(f"    Completed: {success_count} stocks")
                     except Exception:
                         self.writer.rollback()
                         raise
@@ -421,6 +432,7 @@ def download_all_data(
     skip_fundamentals: bool = False,
     start_date: str = None,
     download_dir: str = None,
+    refresh_fundamentals: bool = False,
 ):
     """
     Main mootdx download function.
@@ -471,9 +483,16 @@ def download_all_data(
                     end_date_str,
                 )
                 if test_df.empty:
-                    print(f"\nStocks data already up to date (max_date: {global_max_date})")
-                    print("No new trading days since last update, skipping stock download.")
-                    skip_stock_download = True
+                    # OHLCV is current, but check if extras are missing
+                    # (e.g. after TDX bulk import, adjust_factors/exrights are empty)
+                    adj_max = downloader.writer.get_max_date("adjust_factors")
+                    if adj_max:
+                        print(f"\nStocks data already up to date (max_date: {global_max_date})")
+                        print("No new trading days since last update, skipping stock download.")
+                        skip_stock_download = True
+                    else:
+                        print(f"\nOHLCV up to date (max_date: {global_max_date})")
+                        print("But adjust factors missing, downloading extras...")
 
             if not skip_stock_download:
                 # Get stock list from mootdx
@@ -525,7 +544,8 @@ def download_all_data(
                 print("\nDownloading batch financial data (mootdx Affair)...")
                 try:
                     downloader.download_fundamentals_batch(
-                        start_date_str, end_date_str
+                        start_date_str, end_date_str,
+                        refresh=refresh_fundamentals,
                     )
                 except Exception as e:
                     logger.error(f"Failed to download fundamentals: {e}")
@@ -603,6 +623,11 @@ if __name__ == "__main__":
         default=None,
         help="Directory for downloading financial data ZIP files",
     )
+    parser.add_argument(
+        "--refresh-fundamentals",
+        action="store_true",
+        help="Force re-download all financial data quarters",
+    )
 
     args = parser.parse_args()
 
@@ -610,4 +635,5 @@ if __name__ == "__main__":
         skip_fundamentals=args.skip_fundamentals,
         start_date=args.start_date,
         download_dir=args.download_dir,
+        refresh_fundamentals=args.refresh_fundamentals,
     )

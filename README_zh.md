@@ -107,6 +107,13 @@ poetry shell
 # BaoStock: 估值指标、ST/停牌状态、指数成分股
 poetry run python scripts/download.py
 
+# 首次下载加速：先导入 TDX 日线包，再补充复权因子等
+# （6000+ 只股票的 OHLCV 从数小时缩短到几分钟）
+poetry run python scripts/download.py --tdx-download --source mootdx --skip-fundamentals
+
+# 使用已下载的 TDX ZIP 文件
+poetry run python scripts/download.py --tdx-source data/downloads/hsjday.zip --source mootdx
+
 # 查看数据状态
 poetry run python scripts/download.py --status
 
@@ -124,7 +131,8 @@ poetry run python scripts/download.py --source baostock
 
 | 数据类型 | 负责数据源 | 原因 |
 |---------|-----------|------|
-| 行情 OHLCV | Mootdx | 速度快，本地网络 |
+| 行情 OHLCV（首次） | TDX 日线包 | 最快，~500MB 一次性导入全部历史 |
+| 行情 OHLCV（增量） | Mootdx | 速度快，本地网络 |
 | 复权因子 | Mootdx | 随行情一起下载 |
 | 除权除息 (XDXR) | Mootdx | 数据更完整 |
 | 批量财务数据 | Mootdx | 一个ZIP=所有股票，远优于逐股查询 |
@@ -339,6 +347,14 @@ poetry run python scripts/export_parquet.py
 
 ## 版本历史
 
+### v1.1.0 (2026-03-10) - TDX 快速导入集成
+- 新增 `--tdx-download` 参数：自动下载 TDX 官方沪深日线包并导入
+- 新增 `--tdx-source` 参数：从本地 ZIP 文件或目录导入 TDX 日线数据
+- 首次下载 6000+ 只股票 OHLCV 从数小时缩短到几分钟
+- TDX 导入作为 Phase 0 在 Mootdx 阶段之前自动执行
+- 修复 TDX 导入后复权因子和除权除息无法补充下载的问题
+- 复权因子和除权除息改为按个股检查是否缺失，独立于 OHLCV 增量逻辑
+
 ### v0.6.0 (2026-02-08) - 美股数据支持
 - 新增 yfinance 数据源，支持 6000+ 只美股普通股
 - 美股代码格式 `AAPL.US`，与 A 股 `{code}.{market}` 一致
@@ -394,4 +410,4 @@ poetry run python scripts/export_parquet.py
 
 ---
 
-**项目状态**: 生产就绪 | **当前版本**: v0.6.0 | **最后更新**: 2026-02-08
+**项目状态**: 生产就绪 | **当前版本**: v1.1.0 | **最后更新**: 2026-03-10
