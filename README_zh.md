@@ -213,11 +213,16 @@ SimTradeData/
 │   ├── download.py                # 统一下载入口（A股推荐）
 │   ├── download_efficient.py      # BaoStock 下载脚本
 │   ├── download_mootdx.py         # Mootdx（通达信API）下载脚本
+│   ├── download_daily_extras.py   # EastMoney 补充数据下载脚本
 │   ├── download_tdx_day.py        # TDX 官方日线数据包下载导入脚本
 │   ├── download_us.py             # 美股下载脚本（yfinance）
 │   ├── import_tdx_day.py          # TDX .day 文件导入脚本
 │   └── export_parquet.py          # Parquet 导出脚本
 ├── simtradedata/
+│   ├── router/
+│   │   ├── smart_router.py      # SmartRouter 智能数据源路由
+│   │   ├── route_config.py      # 路由表配置
+│   │   └── exceptions.py        # 路由异常
 │   ├── fetchers/
 │   │   ├── base_fetcher.py      # 基础 Fetcher 类
 │   │   ├── baostock_fetcher.py  # BaoStock 数据获取
@@ -225,6 +230,7 @@ SimTradeData/
 │   │   ├── mootdx_fetcher.py    # Mootdx 基础数据获取
 │   │   ├── mootdx_unified_fetcher.py  # Mootdx 统一数据获取
 │   │   ├── mootdx_affair_fetcher.py   # Mootdx 财务数据获取
+│   │   ├── eastmoney_fetcher.py # EastMoney 补充数据获取
 │   │   └── yfinance_fetcher.py  # yfinance 美股数据获取
 │   ├── processors/
 │   │   └── data_splitter.py     # 数据分流处理
@@ -247,7 +253,26 @@ SimTradeData/
 
 ### 核心模块
 
-**1. UnifiedDataFetcher** - 统一数据获取
+**1. SmartRouter** - 智能数据源路由
+- 统一数据访问接口，自动根据数据类型和市场选择最佳数据源
+- 静态优先级 + 健康感知：主源失败时自动 fallback 到备用源
+- 集成 Phase 1 熔断器，跳过不健康的数据源
+
+```python
+from simtradedata.router import SmartRouter
+
+with SmartRouter() as router:
+    # 自动选择最佳源：mootdx → eastmoney → baostock
+    df = router.get_daily_bars("600000.SS", "2024-01-01", "2024-12-31")
+
+    # 单源数据也走 router，接口统一
+    mf = router.get_money_flow("600000.SS", "2024-01-01", "2024-12-31")
+
+    # 美股自动路由到 yfinance
+    us = router.get_daily_bars("AAPL.US", "2024-01-01", "2024-12-31")
+```
+
+**2. UnifiedDataFetcher** - 统一数据获取
 - 一次 API 调用获取行情、估值、状态数据
 - 减少 API 调用次数 33%
 
@@ -310,14 +335,17 @@ BATCH_SIZE = 20
 
 ### 数据源对比
 
-| 特性 | BaoStock | Mootdx API | TDX 官方数据包 | yfinance (美股) |
-|------|----------|------------|---------------|----------------|
-| 市场 | A股 | A股 | A股 | 美股 |
-| 速度 | 较慢 | 快 | 最快（一次性下载） | 中等 |
-| 估值数据 | 有 (PE/PB/PS等) | 无 | 无 | 有（计算得出） |
-| 财务数据 | 有（逐股查询） | 有（批量ZIP，更快） | 无 | 有（逐股查询） |
-| 历史起始 | 2015年 | 2015年 | 完整历史 | 完整历史 |
-| API Key | 不需要 | 不需要 | N/A | 不需要 |
+| 特性 | BaoStock | Mootdx API | EastMoney | TDX 官方数据包 | yfinance (美股) |
+|------|----------|------------|-----------|---------------|----------------|
+| 市场 | A股 | A股 | A股 | A股 | 美股 |
+| 速度 | 较慢 | 快 | 快 | 最快（一次性下载） | 中等 |
+| 估值数据 | 有 (PE/PB/PS等) | 无 | 无 | 无 | 有（计算得出） |
+| 财务数据 | 有（逐股查询） | 有（批量ZIP，更快） | 无 | 无 | 有（逐股查询） |
+| 资金流向 | 无 | 无 | 有（独有） | 无 | 无 |
+| 龙虎榜 | 无 | 无 | 有（独有） | 无 | 无 |
+| 融资融券 | 无 | 无 | 有（独有） | 无 | 无 |
+| 历史起始 | 2015年 | 2015年 | 2015年 | 完整历史 | 完整历史 |
+| API Key | 不需要 | 不需要 | 不需要 | N/A | 不需要 |
 
 > **推荐**：使用 `scripts/download.py` 统一命令，自动让 Mootdx 负责行情和财务，BaoStock 负责估值和状态，各取所长。
 
@@ -345,7 +373,28 @@ poetry run python scripts/export_parquet.py
 - 数据来自 BaoStock 免费数据源
 - 仅供学习研究使用
 
+## 测试
+
+```bash
+# 单元测试（无需网络）
+poetry run pytest tests/ -v
+
+# SmartRouter 路由和 fallback 测试
+poetry run pytest tests/router/ -v
+
+# SmartRouter 真实数据源集成测试（需要网络）
+poetry run python scripts/test_smart_router_live.py
+```
+
 ## 版本历史
+
+### v1.2.0 (2026-03-13) - 智能数据源路由
+- 新增 SmartRouter 统一数据访问层
+- 自动根据数据类型和市场选择最佳数据源
+- 静态优先级 + 熔断器健康感知，主源失败自动 fallback
+- 支持 13 种数据类型：日线、复权因子、XDXR、财务、估值、资金流向、龙虎榜、融资融券等
+- 新增 EastMoney 数据源作为 A 股日线 fallback
+- 输出列标准化：无论使用哪个数据源，返回一致的列结构
 
 ### v1.1.0 (2026-03-10) - TDX 快速导入集成
 - 新增 `--tdx-download` 参数：自动下载 TDX 官方沪深日线包并导入
@@ -410,4 +459,4 @@ poetry run python scripts/export_parquet.py
 
 ---
 
-**项目状态**: 生产就绪 | **当前版本**: v1.1.0 | **最后更新**: 2026-03-10
+**项目状态**: 生产就绪 | **当前版本**: v1.2.0 | **最后更新**: 2026-03-13

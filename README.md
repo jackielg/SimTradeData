@@ -213,11 +213,16 @@ SimTradeData/
 │   ├── download.py                # Unified download entry (recommended for A-shares)
 │   ├── download_efficient.py      # BaoStock download script
 │   ├── download_mootdx.py         # Mootdx (TDX API) download script
+│   ├── download_daily_extras.py   # EastMoney complementary data download script
 │   ├── download_tdx_day.py        # TDX official daily data package download/import
 │   ├── download_us.py             # US stock download script (yfinance)
 │   ├── import_tdx_day.py          # TDX .day file import script
 │   └── export_parquet.py          # Parquet export script
 ├── simtradedata/
+│   ├── router/
+│   │   ├── smart_router.py      # SmartRouter - smart data source routing
+│   │   ├── route_config.py      # Route table configuration
+│   │   └── exceptions.py        # Router exceptions
 │   ├── fetchers/
 │   │   ├── base_fetcher.py      # Base Fetcher class
 │   │   ├── baostock_fetcher.py  # BaoStock data fetching
@@ -225,6 +230,7 @@ SimTradeData/
 │   │   ├── mootdx_fetcher.py    # Mootdx basic data fetching
 │   │   ├── mootdx_unified_fetcher.py  # Mootdx unified data fetching
 │   │   ├── mootdx_affair_fetcher.py   # Mootdx financial data fetching
+│   │   ├── eastmoney_fetcher.py # EastMoney complementary data fetching
 │   │   └── yfinance_fetcher.py  # yfinance US stock data fetching
 │   ├── processors/
 │   │   └── data_splitter.py     # Data stream splitting
@@ -247,7 +253,26 @@ SimTradeData/
 
 ### Core Modules
 
-**1. UnifiedDataFetcher** - Unified Data Fetching
+**1. SmartRouter** - Smart Data Source Router
+- Unified data access API, automatically selects the best data source by data type and market
+- Static priority + health-aware: auto fallback to backup sources when primary fails
+- Integrates Phase 1 circuit breaker, skips unhealthy sources
+
+```python
+from simtradedata.router import SmartRouter
+
+with SmartRouter() as router:
+    # Auto-selects best source: mootdx → eastmoney → baostock
+    df = router.get_daily_bars("600000.SS", "2024-01-01", "2024-12-31")
+
+    # Single-source data also goes through router for unified API
+    mf = router.get_money_flow("600000.SS", "2024-01-01", "2024-12-31")
+
+    # US stocks auto-route to yfinance
+    us = router.get_daily_bars("AAPL.US", "2024-01-01", "2024-12-31")
+```
+
+**2. UnifiedDataFetcher** - Unified Data Fetching
 - Single API call fetches market, valuation, and status data
 - Reduces API calls by 33%
 
@@ -310,14 +335,17 @@ BATCH_SIZE = 20
 
 ### Data Source Comparison
 
-| Feature | BaoStock | Mootdx API | TDX Official Package | yfinance (US) |
-|---------|----------|------------|---------------------|---------------|
-| Market | A-shares | A-shares | A-shares | US stocks |
-| Speed | Slower | Fast | Fastest (bulk download) | Medium |
-| Valuation Data | Yes (PE/PB/PS etc.) | No | No | Yes (computed) |
-| Financial Data | Yes (per-stock query) | Yes (bulk ZIP, faster) | No | Yes (per-stock query) |
-| History Start | 2015 | 2015 | Full history | Full history |
-| API Key | Not required | Not required | N/A | Not required |
+| Feature | BaoStock | Mootdx API | EastMoney | TDX Official Package | yfinance (US) |
+|---------|----------|------------|-----------|---------------------|---------------|
+| Market | A-shares | A-shares | A-shares | A-shares | US stocks |
+| Speed | Slower | Fast | Fast | Fastest (bulk download) | Medium |
+| Valuation Data | Yes (PE/PB/PS etc.) | No | No | No | Yes (computed) |
+| Financial Data | Yes (per-stock query) | Yes (bulk ZIP, faster) | No | No | Yes (per-stock query) |
+| Money Flow | No | No | Yes (exclusive) | No | No |
+| Dragon Tiger Board | No | No | Yes (exclusive) | No | No |
+| Margin Trading | No | No | Yes (exclusive) | No | No |
+| History Start | 2015 | 2015 | 2015 | Full history | Full history |
+| API Key | Not required | Not required | Not required | N/A | Not required |
 
 > **Recommended**: Use `scripts/download.py` unified command to automatically assign Mootdx for market data and financials, BaoStock for valuation and status, leveraging each source's strengths.
 
@@ -344,7 +372,28 @@ Step 1 automatically detects the latest date of existing data in DuckDB and only
 - Data sourced from BaoStock free data service
 - For research and educational purposes only
 
+## Testing
+
+```bash
+# Unit tests (no network required)
+poetry run pytest tests/ -v
+
+# SmartRouter routing and fallback tests
+poetry run pytest tests/router/ -v
+
+# SmartRouter live integration test (requires network)
+poetry run python scripts/test_smart_router_live.py
+```
+
 ## Version History
+
+### v1.2.0 (2026-03-13) - Smart Data Source Router
+- Added SmartRouter unified data access layer
+- Auto-selects best data source by data type and market
+- Static priority + circuit breaker health-aware, auto fallback on failure
+- Supports 13 data types: daily bars, adjust factors, XDXR, fundamentals, valuation, money flow, LHB, margin trading, etc.
+- Added EastMoney as A-share daily bars fallback source
+- Output column normalization: consistent column structure regardless of source
 
 ### v1.1.0 (2026-03-10) - TDX Fast Import Integration
 - Added `--tdx-download` flag: auto-download TDX official daily data package and import
@@ -409,4 +458,4 @@ This project is licensed under AGPL-3.0. See the [LICENSE](LICENSE) file for det
 
 ---
 
-**Status**: Production Ready | **Version**: v1.1.0 | **Last Updated**: 2026-03-10
+**Status**: Production Ready | **Version**: v1.2.0 | **Last Updated**: 2026-03-13
