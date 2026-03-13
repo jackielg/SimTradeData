@@ -152,6 +152,9 @@ class MootdxFetcher(BaseFetcher):
                 logger.debug(f"No daily data for {symbol}")
                 return pd.DataFrame()
 
+            # mootdx k() returns 'date' as both index and column; drop index
+            df = df.reset_index(drop=True)
+
             # Apply adjustment if requested
             if adjust:
                 df_adj = self._client.bars(
@@ -350,6 +353,9 @@ class MootdxFetcher(BaseFetcher):
                 logger.debug(f"No index data for {symbol}")
                 return pd.DataFrame()
 
+            # mootdx index() returns 'date' as both index and column; drop index
+            df = df.reset_index(drop=True)
+
             df = df.rename(columns={"datetime": "date", "vol": "volume"})
 
             # Filter by date range if specified
@@ -455,9 +461,10 @@ class MootdxFetcher(BaseFetcher):
             if hfq_df is None or hfq_df.empty:
                 return pd.DataFrame()
 
-            # Calculate adjust factor: hfq_close / raw_close
-            raw_df = raw_df.rename(columns={"datetime": "date"})
-            hfq_df = hfq_df.rename(columns={"datetime": "date"})
+            # mootdx k() returns 'date' as both index and column;
+            # drop the index to avoid ambiguity in merge()
+            raw_df = raw_df.reset_index(drop=True)
+            hfq_df = hfq_df.reset_index(drop=True)
 
             raw_df["date"] = pd.to_datetime(raw_df["date"])
             hfq_df["date"] = pd.to_datetime(hfq_df["date"])
