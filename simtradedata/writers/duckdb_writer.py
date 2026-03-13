@@ -217,6 +217,45 @@ class DuckDBWriter:
         # Migrate existing table: add filename and file_hash columns if missing
         self._migrate_fundamentals_progress()
 
+        # Money flow data (from EastMoney)
+        self.conn.execute("""
+            CREATE TABLE IF NOT EXISTS money_flow (
+                symbol VARCHAR NOT NULL,
+                date DATE NOT NULL,
+                net_main DOUBLE,
+                net_super DOUBLE,
+                net_large DOUBLE,
+                net_medium DOUBLE,
+                net_small DOUBLE,
+                PRIMARY KEY (symbol, date)
+            )
+        """)
+
+        # LHB (Dragon Tiger Board) data
+        self.conn.execute("""
+            CREATE TABLE IF NOT EXISTS lhb (
+                symbol VARCHAR NOT NULL,
+                date DATE NOT NULL,
+                reason VARCHAR DEFAULT '',
+                net_buy DOUBLE,
+                buy_amount DOUBLE,
+                sell_amount DOUBLE,
+                PRIMARY KEY (symbol, date, reason)
+            )
+        """)
+
+        # Margin trading data
+        self.conn.execute("""
+            CREATE TABLE IF NOT EXISTS margin_trading (
+                symbol VARCHAR NOT NULL,
+                date DATE NOT NULL,
+                rzye DOUBLE,
+                rqyl DOUBLE,
+                rzrqye DOUBLE,
+                PRIMARY KEY (symbol, date)
+            )
+        """)
+
         self.conn.execute("""
             CREATE TABLE IF NOT EXISTS version_info (
                 key VARCHAR PRIMARY KEY,
@@ -700,6 +739,49 @@ class DuckDBWriter:
             INSERT OR REPLACE INTO stock_status (date, status_type, symbols)
             VALUES (?, ?, ?)
         """, [date, status_type, symbols_json])
+
+    def write_money_flow(self, symbol: str, df: pd.DataFrame) -> int:
+        """Write money flow data with upsert."""
+        if df.empty:
+            return 0
+        df = df.copy()
+        df["symbol"] = symbol
+        df["date"] = pd.to_datetime(df["date"]).dt.date
+        columns = ["symbol", "date", "net_main", "net_super", "net_large", "net_medium", "net_small"]
+        available = [c for c in columns if c in df.columns]
+        df = df[available]
+        cols_str = ", ".join(available)
+        self.conn.execute(f"INSERT OR REPLACE INTO money_flow ({cols_str}) SELECT {cols_str} FROM df")
+        return len(df)
+
+    def write_lhb(self, df: pd.DataFrame) -> int:
+        """Write LHB data with upsert. DataFrame must include symbol column."""
+        if df.empty:
+            return 0
+        df = df.copy()
+        df["date"] = pd.to_datetime(df["date"]).dt.date
+        if "reason" in df.columns:
+            df["reason"] = df["reason"].fillna("")
+        columns = ["symbol", "date", "reason", "net_buy", "buy_amount", "sell_amount"]
+        available = [c for c in columns if c in df.columns]
+        df = df[available]
+        cols_str = ", ".join(available)
+        self.conn.execute(f"INSERT OR REPLACE INTO lhb ({cols_str}) SELECT {cols_str} FROM df")
+        return len(df)
+
+    def write_margin_trading(self, symbol: str, df: pd.DataFrame) -> int:
+        """Write margin trading data with upsert."""
+        if df.empty:
+            return 0
+        df = df.copy()
+        df["symbol"] = symbol
+        df["date"] = pd.to_datetime(df["date"]).dt.date
+        columns = ["symbol", "date", "rzye", "rqyl", "rzrqye"]
+        available = [c for c in columns if c in df.columns]
+        df = df[available]
+        cols_str = ", ".join(available)
+        self.conn.execute(f"INSERT OR REPLACE INTO margin_trading ({cols_str}) SELECT {cols_str} FROM df")
+        return len(df)
 
     def write_global_metadata(self, meta: pd.Series) -> None:
         """Write global metadata to version_info table"""
