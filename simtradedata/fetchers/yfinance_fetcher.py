@@ -40,6 +40,8 @@ class YFinanceFetcher(BaseFetcher):
     - Index constituents (S&P 500, NASDAQ-100) from Wikipedia
     """
 
+    source_name = "yfinance"
+
     def __init__(self, rate_limit: float = 0.5):
         super().__init__()
         self._rate_limit = rate_limit

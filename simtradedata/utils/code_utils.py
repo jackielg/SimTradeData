@@ -4,6 +4,7 @@ Utility functions for stock code conversion
 
 from functools import wraps
 import time
+import warnings
 
 
 def convert_to_ptrade_code(code: str, source: str = "baostock") -> str:
@@ -134,16 +135,13 @@ def get_mootdx_market(symbol: str) -> int:
 
 
 def retry_on_failure(max_retries: int = 1, delay: float = 0.0):
-    """
-    Decorator factory for retrying a function on failure.
+    """Deprecated: use simtradedata.resilience.retry.retry instead."""
+    warnings.warn(
+        "retry_on_failure is deprecated, use simtradedata.resilience.retry.retry",
+        DeprecationWarning,
+        stacklevel=2,
+    )
 
-    Args:
-        max_retries (int): Maximum number of retries.
-        delay (float): Delay between retries in seconds.
-
-    Returns:
-        A decorator.
-    """
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):

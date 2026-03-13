@@ -9,9 +9,12 @@ import baostock as bs
 import pandas as pd
 
 from simtradedata.fetchers.base_fetcher import BaseFetcher
-from simtradedata.utils.code_utils import convert_from_ptrade_code, retry_on_failure
+from simtradedata.resilience.retry import RetryConfig, retry
+from simtradedata.utils.code_utils import convert_from_ptrade_code
 
 logger = logging.getLogger(__name__)
+
+_BAOSTOCK_RETRY = RetryConfig(max_retries=2, base_delay=1.0)
 
 
 class BaoStockFetcher(BaseFetcher):
@@ -25,6 +28,8 @@ class BaoStockFetcher(BaseFetcher):
     - Adjust factors
     - Dividend data
     """
+
+    source_name = "baostock"
 
     # Class-level login state tracking (BaoStock uses global session)
     _bs_logged_in = False
@@ -61,7 +66,7 @@ class BaoStockFetcher(BaseFetcher):
             BaoStockFetcher._bs_login_count = 0
 
 
-    @retry_on_failure()
+    @retry(config=_BAOSTOCK_RETRY)
     def fetch_adjust_factor(
         self, symbol: str, start_date: str, end_date: str
     ) -> pd.DataFrame:
@@ -120,7 +125,7 @@ class BaoStockFetcher(BaseFetcher):
         return df
 
 
-    @retry_on_failure()
+    @retry(config=_BAOSTOCK_RETRY)
     def fetch_stock_basic(self, symbol: str) -> pd.DataFrame:
         """
         Fetch stock basic information
@@ -148,7 +153,7 @@ class BaoStockFetcher(BaseFetcher):
         return df
 
 
-    @retry_on_failure()
+    @retry(config=_BAOSTOCK_RETRY)
     def fetch_stock_industry(self, symbol: str, date: str = None) -> pd.DataFrame:
         """
         Fetch stock industry classification
@@ -176,7 +181,7 @@ class BaoStockFetcher(BaseFetcher):
 
         return df
 
-    @retry_on_failure()
+    @retry(config=_BAOSTOCK_RETRY)
     def fetch_trade_calendar(self, start_date: str, end_date: str) -> pd.DataFrame:
         """
         Fetch trading calendar
@@ -201,7 +206,7 @@ class BaoStockFetcher(BaseFetcher):
 
         return df
 
-    @retry_on_failure()
+    @retry(config=_BAOSTOCK_RETRY)
     def fetch_index_stocks(self, index_code: str, date: str = None) -> pd.DataFrame:
         """
         Fetch index constituent stocks
@@ -248,7 +253,7 @@ class BaoStockFetcher(BaseFetcher):
 
         return df
 
-    @retry_on_failure()
+    @retry(config=_BAOSTOCK_RETRY)
     def fetch_quarterly_fundamentals(
         self, symbol: str, year: int, quarter: int
     ) -> pd.DataFrame:
@@ -370,7 +375,7 @@ class BaoStockFetcher(BaseFetcher):
         logger.info(f"Fetched fundamentals for {symbol} {year}Q{quarter}: {len(result)} rows")
         return result
 
-    @retry_on_failure()
+    @retry(config=_BAOSTOCK_RETRY)
     def fetch_dividend_data(
         self, symbol: str, year: int, year_type: str = "operate"
     ) -> pd.DataFrame:

@@ -12,13 +12,15 @@ from typing import List, Optional
 import pandas as pd
 
 from simtradedata.fetchers.base_fetcher import BaseFetcher
+from simtradedata.resilience.retry import RetryConfig, retry
 from simtradedata.utils.code_utils import (
     convert_from_ptrade_code,
     get_mootdx_market,
-    retry_on_failure,
 )
 
 logger = logging.getLogger(__name__)
+
+_MOOTDX_RETRY = RetryConfig(max_retries=3, base_delay=2.0)
 
 # Frequency constants for mootdx bars API
 FREQ_5M = 0
@@ -45,6 +47,8 @@ class MootdxFetcher(BaseFetcher):
     - Company financial data
     - Stock list
     """
+
+    source_name = "mootdx"
 
     def __init__(self, multithread: bool = True, timeout: int = 15):
         """
@@ -81,7 +85,7 @@ class MootdxFetcher(BaseFetcher):
         if self._client is None:
             self.login()
 
-    @retry_on_failure(max_retries=2, delay=0.5)
+    @retry(config=_MOOTDX_RETRY)
     def fetch_stock_list(self, market: int = None) -> pd.DataFrame:
         """
         Fetch stock list from mootdx.
@@ -116,7 +120,7 @@ class MootdxFetcher(BaseFetcher):
 
         return pd.concat(dfs, ignore_index=True)
 
-    @retry_on_failure(max_retries=2, delay=0.5)
+    @retry(config=_MOOTDX_RETRY)
     def fetch_daily_bars(
         self,
         symbol: str,
@@ -185,7 +189,7 @@ class MootdxFetcher(BaseFetcher):
             logger.error(f"Failed to fetch daily bars for {symbol}: {e}")
             raise
 
-    @retry_on_failure(max_retries=2, delay=0.5)
+    @retry(config=_MOOTDX_RETRY)
     def fetch_minute_bars(
         self,
         symbol: str,
@@ -222,7 +226,7 @@ class MootdxFetcher(BaseFetcher):
             logger.error(f"Failed to fetch minute bars for {symbol}: {e}")
             raise
 
-    @retry_on_failure(max_retries=2, delay=0.5)
+    @retry(config=_MOOTDX_RETRY)
     def fetch_realtime_quotes(self, symbols: List[str]) -> pd.DataFrame:
         """
         Fetch real-time quotes for multiple stocks (mootdx unique feature).
@@ -254,7 +258,7 @@ class MootdxFetcher(BaseFetcher):
             logger.error(f"Failed to fetch real-time quotes: {e}")
             raise
 
-    @retry_on_failure(max_retries=2, delay=0.5)
+    @retry(config=_MOOTDX_RETRY)
     def fetch_xdxr(self, symbol: str) -> pd.DataFrame:
         """
         Fetch XDXR (ex-dividend/ex-rights) data.
@@ -283,7 +287,7 @@ class MootdxFetcher(BaseFetcher):
             logger.error(f"Failed to fetch XDXR for {symbol}: {e}")
             raise
 
-    @retry_on_failure(max_retries=2, delay=0.5)
+    @retry(config=_MOOTDX_RETRY)
     def fetch_stock_basic(self, symbol: str) -> pd.DataFrame:
         """
         Fetch basic financial information for a stock.
@@ -314,7 +318,7 @@ class MootdxFetcher(BaseFetcher):
             logger.error(f"Failed to fetch finance for {symbol}: {e}")
             raise
 
-    @retry_on_failure(max_retries=2, delay=0.5)
+    @retry(config=_MOOTDX_RETRY)
     def fetch_index_bars(
         self,
         symbol: str,
@@ -373,7 +377,7 @@ class MootdxFetcher(BaseFetcher):
             logger.error(f"Failed to fetch index bars for {symbol}: {e}")
             raise
 
-    @retry_on_failure(max_retries=2, delay=0.5)
+    @retry(config=_MOOTDX_RETRY)
     def fetch_trade_calendar(
         self,
         start_date: str,
@@ -415,7 +419,7 @@ class MootdxFetcher(BaseFetcher):
 
         return result
 
-    @retry_on_failure(max_retries=2, delay=0.5)
+    @retry(config=_MOOTDX_RETRY)
     def fetch_adjust_factor(
         self,
         symbol: str,
