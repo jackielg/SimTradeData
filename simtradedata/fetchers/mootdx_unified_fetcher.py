@@ -9,6 +9,7 @@ import logging
 
 import pandas as pd
 
+from simtradedata.cache import DEFAULT_TTL, cached
 from simtradedata.config.field_mappings import MARKET_FIELD_MAP
 from simtradedata.fetchers.mootdx_affair_fetcher import MootdxAffairFetcher
 from simtradedata.fetchers.mootdx_fetcher import MootdxFetcher
@@ -133,6 +134,7 @@ class MootdxUnifiedFetcher:
 
         return df
 
+    @cached(ttl=DEFAULT_TTL["stock_list"], key_prefix="mootdx_stock_list")
     def fetch_stock_list(self) -> list:
         """
         Fetch all stock codes in PTrade format.
@@ -221,6 +223,7 @@ class MootdxUnifiedFetcher:
         """
         return self._affair_fetcher.fetch_fundamentals_for_quarter(year, quarter)
 
+    @cached(ttl=DEFAULT_TTL["trade_calendar"], key_prefix="mootdx_trade_cal")
     def fetch_trade_calendar(
         self,
         start_date: str,
