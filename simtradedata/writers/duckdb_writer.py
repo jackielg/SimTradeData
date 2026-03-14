@@ -886,12 +886,77 @@ class DuckDBWriter:
             return {"rows": 0}
 
     # ========================================
+    # Derived fields
+    # ========================================
+
+    def compute_derived_fundamentals(self) -> None:
+        """
+        Fill roa, roe_ttm, roa_ttm from existing fundamentals data.
+
+        - roa = roe / (1 + debt_equity_ratio)
+        - roe_ttm = rolling sum of roe over 4 quarters
+        - roa_ttm = rolling sum of roa over 4 quarters
+        """
+        # roa = roe / (1 + debt_equity_ratio)
+        self.conn.execute("""
+            UPDATE fundamentals
+            SET roa = roe / (1 + debt_equity_ratio)
+            WHERE roe IS NOT NULL
+              AND debt_equity_ratio IS NOT NULL
+              AND debt_equity_ratio != -1
+              AND roa IS NULL
+        """)
+
+        # roe_ttm / roa_ttm = rolling 4-quarter sum
+        self.conn.execute("""
+            UPDATE fundamentals f
+            SET
+                roe_ttm = sub.roe_ttm,
+                roa_ttm = sub.roa_ttm
+            FROM (
+                SELECT
+                    symbol, date,
+                    SUM(roe) OVER w AS roe_ttm,
+                    SUM(roa) OVER w AS roa_ttm
+                FROM fundamentals
+                WHERE roe IS NOT NULL OR roa IS NOT NULL
+                WINDOW w AS (
+                    PARTITION BY symbol
+                    ORDER BY date
+                    ROWS BETWEEN 3 PRECEDING AND CURRENT ROW
+                )
+            ) sub
+            WHERE f.symbol = sub.symbol
+              AND f.date = sub.date
+              AND f.roe_ttm IS NULL
+        """)
+
+        updated = self.conn.execute("""
+            SELECT
+                SUM(CASE WHEN roa IS NOT NULL THEN 1 ELSE 0 END),
+                SUM(CASE WHEN roe_ttm IS NOT NULL THEN 1 ELSE 0 END),
+                SUM(CASE WHEN roa_ttm IS NOT NULL THEN 1 ELSE 0 END)
+            FROM fundamentals
+        """).fetchone()
+        logger.info(
+            f"Derived fundamentals: roa={updated[0]:,} roe_ttm={updated[1]:,} roa_ttm={updated[2]:,}"
+        )
+
+    # ========================================
     # Export to Parquet
     # ========================================
 
     def export_to_parquet(self, output_dir: str, market: str = "cn") -> None:
         """Export all data to PTrade Parquet format"""
         output_path = Path(output_dir)
+
+        # Compute derived fields before export
+        self.compute_derived_fundamentals()
+
+        # Clean output directory to avoid mixing data from different markets
+        if output_path.exists():
+            import shutil
+            shutil.rmtree(output_path)
 
         for subdir in ["stocks", "exrights", "fundamentals", "valuation", "metadata"]:
             (output_path / subdir).mkdir(parents=True, exist_ok=True)
@@ -946,7 +1011,7 @@ class DuckDBWriter:
                         SELECT * EXCLUDE (symbol) FROM {table}
                         WHERE symbol = '{symbol_escaped}'
                         ORDER BY date
-                    ) TO '{output_file}' (FORMAT PARQUET)
+                    ) TO '{output_file}' (FORMAT PARQUET, CODEC 'ZSTD')
                 """)
 
         logger.info(f"Exported {len(symbols)} {table} files")
@@ -970,7 +1035,7 @@ class DuckDBWriter:
                     FROM stocks
                     WHERE symbol = '{symbol_escaped}'
                     ORDER BY date
-                ) TO '{output_file}' (FORMAT PARQUET)
+                ) TO '{output_file}' (FORMAT PARQUET, CODEC 'ZSTD')
             """)
             return
         # Extract numeric code prefix to determine board type
@@ -997,7 +1062,7 @@ class DuckDBWriter:
                     FROM stocks
                     WHERE symbol = '{symbol_escaped}'
                     ORDER BY date
-                ) TO '{output_file}' (FORMAT PARQUET)
+                ) TO '{output_file}' (FORMAT PARQUET, CODEC 'ZSTD')
             """)
         else:
             # Normal stocks: 10% limit (ST handling needs isST from status)
@@ -1012,7 +1077,7 @@ class DuckDBWriter:
                     FROM stocks
                     WHERE symbol = '{symbol_escaped}'
                     ORDER BY date
-                ) TO '{output_file}' (FORMAT PARQUET)
+                ) TO '{output_file}' (FORMAT PARQUET, CODEC 'ZSTD')
             """)
 
     def _export_fundamentals_with_ttm(
@@ -1054,7 +1119,7 @@ class DuckDBWriter:
                 FROM fundamentals
                 WHERE symbol = '{symbol_escaped}'
                 ORDER BY date
-            ) TO '{output_file}' (FORMAT PARQUET)
+            ) TO '{output_file}' (FORMAT PARQUET, CODEC 'ZSTD')
         """)
 
     def _export_valuation_enriched(
@@ -1078,8 +1143,6 @@ class DuckDBWriter:
                         v.ps_ttm,
                         v.pcf,
                         v.turnover_rate,
-                        -- Calculate naps from close/pb (pb = close/naps, so naps = close/pb)
-                        -- Need to get close from stocks table
                         s.close
                     FROM valuation v
                     LEFT JOIN stocks s ON v.symbol = s.symbol AND v.date = s.date
@@ -1122,7 +1185,7 @@ class DuckDBWriter:
                 FROM combined
                 WINDOW w AS (ORDER BY date ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
                 ORDER BY date
-            ) TO '{output_file}' (FORMAT PARQUET)
+            ) TO '{output_file}' (FORMAT PARQUET, CODEC 'ZSTD')
         """)
 
     def _export_metadata(self, output_dir: Path) -> None:
@@ -1132,7 +1195,7 @@ class DuckDBWriter:
         if count > 0:
             self.conn.execute(f"""
                 COPY stock_metadata TO '{output_dir / "stock_metadata.parquet"}'
-                (FORMAT PARQUET)
+                (FORMAT PARQUET, CODEC 'ZSTD')
             """)
 
         # benchmark.parquet
@@ -1140,7 +1203,7 @@ class DuckDBWriter:
         if count > 0:
             self.conn.execute(f"""
                 COPY (SELECT * FROM benchmark ORDER BY date)
-                TO '{output_dir / "benchmark.parquet"}' (FORMAT PARQUET)
+                TO '{output_dir / "benchmark.parquet"}' (FORMAT PARQUET, CODEC 'ZSTD')
             """)
 
         # trade_days.parquet
@@ -1148,7 +1211,7 @@ class DuckDBWriter:
         if count > 0:
             self.conn.execute(f"""
                 COPY (SELECT * FROM trade_days ORDER BY date)
-                TO '{output_dir / "trade_days.parquet"}' (FORMAT PARQUET)
+                TO '{output_dir / "trade_days.parquet"}' (FORMAT PARQUET, CODEC 'ZSTD')
             """)
 
         # index_constituents.parquet
@@ -1156,7 +1219,7 @@ class DuckDBWriter:
         if count > 0:
             self.conn.execute(f"""
                 COPY index_constituents TO '{output_dir / "index_constituents.parquet"}'
-                (FORMAT PARQUET)
+                (FORMAT PARQUET, CODEC 'ZSTD')
             """)
 
         # stock_status.parquet
@@ -1164,7 +1227,7 @@ class DuckDBWriter:
         if count > 0:
             self.conn.execute(f"""
                 COPY stock_status TO '{output_dir / "stock_status.parquet"}'
-                (FORMAT PARQUET)
+                (FORMAT PARQUET, CODEC 'ZSTD')
             """)
 
         # version.parquet
@@ -1197,7 +1260,7 @@ class DuckDBWriter:
                 SELECT date, symbol, adj_a, adj_b
                 FROM adjust_factors
                 ORDER BY date, symbol
-            ) TO '{output_dir / "ptrade_adj_pre.parquet"}' (FORMAT PARQUET)
+            ) TO '{output_dir / "ptrade_adj_pre.parquet"}' (FORMAT PARQUET, CODEC 'ZSTD')
         """)
 
         # ptrade_adj_post.parquet (same data for now)
@@ -1206,7 +1269,7 @@ class DuckDBWriter:
                 SELECT date, symbol, adj_a, adj_b
                 FROM adjust_factors
                 ORDER BY date, symbol
-            ) TO '{output_dir / "ptrade_adj_post.parquet"}' (FORMAT PARQUET)
+            ) TO '{output_dir / "ptrade_adj_post.parquet"}' (FORMAT PARQUET, CODEC 'ZSTD')
         """)
 
     def _write_manifest(self, output_dir: Path) -> None:
