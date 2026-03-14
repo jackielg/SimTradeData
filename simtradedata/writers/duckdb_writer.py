@@ -894,8 +894,8 @@ class DuckDBWriter:
         Fill roa, roe_ttm, roa_ttm from existing fundamentals data.
 
         - roa = roe / (1 + debt_equity_ratio)
-        - roe_ttm = rolling sum of roe over 4 quarters
-        - roa_ttm = rolling sum of roa over 4 quarters
+        - roe_ttm = rolling 4-quarter average of roe
+        - roa_ttm = rolling 4-quarter average of roa
         """
         # roa = roe / (1 + debt_equity_ratio)
         self.conn.execute("""
@@ -907,7 +907,7 @@ class DuckDBWriter:
               AND roa IS NULL
         """)
 
-        # roe_ttm / roa_ttm = rolling 4-quarter sum
+        # roe_ttm / roa_ttm = rolling 4-quarter average
         self.conn.execute("""
             UPDATE fundamentals f
             SET
@@ -916,8 +916,8 @@ class DuckDBWriter:
             FROM (
                 SELECT
                     symbol, date,
-                    SUM(roe) OVER w AS roe_ttm,
-                    SUM(roa) OVER w AS roa_ttm
+                    AVG(roe) OVER w AS roe_ttm,
+                    AVG(roa) OVER w AS roa_ttm
                 FROM fundamentals
                 WHERE roe IS NOT NULL OR roa IS NOT NULL
                 WINDOW w AS (
@@ -1084,10 +1084,12 @@ class DuckDBWriter:
         self, symbol_escaped: str, output_file: Path
     ) -> None:
         """
-        Export fundamentals data with TTM indicators calculated
+        Export fundamentals data with TTM indicators.
 
-        TTM (Trailing Twelve Months) is calculated as 4-quarter rolling average
-        for ratio fields: roe, roa, net_profit_ratio, gross_income_ratio
+        TTM fields (roe_ttm, roa_ttm, net_profit_ratio_ttm, gross_income_ratio_ttm)
+        are pre-computed in DB by compute_derived_fundamentals() or download.
+        Only net_profit_ratio_ttm and gross_income_ratio_ttm are calculated here
+        since they are not stored in the DB.
         """
         self.conn.execute(f"""
             COPY (
@@ -1103,19 +1105,14 @@ class DuckDBWriter:
                     AVG(gross_income_ratio) OVER (
                         ORDER BY date ROWS BETWEEN 3 PRECEDING AND CURRENT ROW
                     ) AS gross_income_ratio_ttm,
-                    roa,
-                    AVG(roa) OVER (
-                        ORDER BY date ROWS BETWEEN 3 PRECEDING AND CURRENT ROW
-                    ) AS roa_ttm,
-                    roe,
-                    AVG(roe) OVER (
-                        ORDER BY date ROWS BETWEEN 3 PRECEDING AND CURRENT ROW
-                    ) AS roe_ttm,
+                    roa, roa_ttm,
+                    roe, roe_ttm,
                     total_asset_grow_rate, total_asset_turnover_rate,
                     current_assets_turnover_rate, inventory_turnover_rate,
                     accounts_receivables_turnover_rate,
                     current_ratio, quick_ratio, debt_equity_ratio,
-                    interest_cover, roic, roa_ebit_ttm
+                    interest_cover, roic, roa_ebit_ttm,
+                    total_shares, a_floats
                 FROM fundamentals
                 WHERE symbol = '{symbol_escaped}'
                 ORDER BY date
