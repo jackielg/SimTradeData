@@ -17,6 +17,7 @@ import argparse
 import fcntl
 import logging
 import os
+import socket
 import sys
 import warnings
 from datetime import datetime, timedelta
@@ -54,6 +55,9 @@ logging.basicConfig(
     filemode="w",
 )
 logger = logging.getLogger(__name__)
+
+# Prevent infinite hangs on TDX server socket recv()
+socket.setdefaulttimeout(30)
 
 
 class ProcessLock:
@@ -112,6 +116,19 @@ class MootdxDownloader:
         self.skip_fundamentals = skip_fundamentals
         self.download_dir = download_dir
         self.failed_stocks = []
+
+    def _reconnect(self):
+        """Reconnect to TDX server after connection error."""
+        logger.warning("Reconnecting to TDX server...")
+        try:
+            self.unified_fetcher.logout()
+        except Exception:
+            pass
+        try:
+            self.unified_fetcher.login()
+            logger.info("TDX server reconnected")
+        except Exception as e:
+            logger.error(f"Failed to reconnect: {e}")
 
     def get_incremental_start_date(self, symbol: str) -> str:
         """Get next date after MAX(date) for incremental updates."""
@@ -177,6 +194,9 @@ class MootdxDownloader:
                         adj_series = adj_df.set_index("date")["backAdjustFactor"]
                         self.writer.write_adjust_factor(symbol, adj_series)
                         downloaded = True
+                except (socket.timeout, ConnectionError):
+                    logger.warning(f"Connection error fetching adjust factor for {symbol}, reconnecting")
+                    self._reconnect()
                 except Exception as e:
                     logger.warning(
                         f"Failed to fetch adjust factor for {symbol}: {e}"
@@ -191,11 +211,19 @@ class MootdxDownloader:
                         if not exrights.empty:
                             self.writer.write_exrights(symbol, exrights)
                             downloaded = True
+                except (socket.timeout, ConnectionError):
+                    logger.warning(f"Connection error fetching XDXR for {symbol}, reconnecting")
+                    self._reconnect()
                 except Exception as e:
                     logger.warning(f"Failed to fetch XDXR for {symbol}: {e}")
 
             return downloaded
 
+        except (socket.timeout, ConnectionError):
+            logger.warning(f"Connection error downloading {symbol}, reconnecting")
+            self.failed_stocks.append(symbol)
+            self._reconnect()
+            return False
         except Exception as e:
             logger.error(f"Failed to download {symbol}: {e}")
             self.failed_stocks.append(symbol)
@@ -537,6 +565,20 @@ def download_all_data(
                 if not stock_pool:
                     print("Error: No stocks found")
                     return
+
+                # Resume: prioritize stocks needing backfill
+                if global_max_date:
+                    result = downloader.writer.conn.execute(
+                        "SELECT DISTINCT symbol FROM stocks WHERE date = ?",
+                        [global_max_date],
+                    ).fetchall()
+                    current_symbols = {r[0] for r in result}
+                    needs_work = [s for s in stock_pool if s not in current_symbols]
+                    already_current = [s for s in stock_pool if s in current_symbols]
+                    if already_current:
+                        stock_pool = needs_work + already_current
+                        print(f"  Resume: {len(needs_work)} need download, "
+                              f"{len(already_current)} already have latest data")
 
                 # Download in batches
                 batches = [
