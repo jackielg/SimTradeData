@@ -461,7 +461,17 @@ poetry run python scripts/test_smart_router_live.py
 - **SimTradeLab**: https://github.com/kay-ou/SimTradeLab
 - **BaoStock**: http://baostock.com/
 - **Mootdx**: https://github.com/mootdx/mootdx
+- **EastMoney**: https://www.eastmoney.com/
 - **yfinance**: https://github.com/ranaroussi/yfinance
+
+## 💖 赞助支持
+
+如果这个项目对您有帮助，欢迎赞助支持开发！
+
+<img src="docs/sponsor/WechatPay.png?raw=true" alt="微信赞助" width="200">
+<img src="docs/sponsor/AliPay.png?raw=true" alt="支付宝赞助" width="200">
+
+**您的支持是我们持续改进的动力！**
 
 ## 许可证
 

@@ -217,4 +217,5 @@ AGENTS.md
 .spec-workflow/*
 *.h5
 *.png
+!docs/sponsor/*.png
 research/
