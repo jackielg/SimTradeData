@@ -7,7 +7,7 @@ Features:
 2. Auto-dedup: uses INSERT OR REPLACE with PRIMARY KEY constraints
 3. Batch transaction: commits once per batch for better performance
 
-Output: DuckDB database (data/simtradedata.duckdb)
+Output: DuckDB database (data/cn.duckdb)
 Export to Parquet: use scripts/export_parquet.py
 """
 
@@ -475,7 +475,7 @@ def download_all_data(
         print("(Each symbol starts from its MAX(date)+1 automatically)")
 
         # Initialize downloader
-        db_path = Path(OUTPUT_DIR) / "simtradedata.duckdb"
+        db_path = Path(DEFAULT_DB_PATH)
         downloader = EfficientBaoStockDownloader(
             db_path=str(db_path),
             skip_fundamentals=skip_fundamentals,
@@ -753,7 +753,7 @@ def download_all_data(
         print("Download Complete!")
         print("=" * 70)
 
-        db_file = Path(OUTPUT_DIR) / "simtradedata.duckdb"
+        db_file = Path(DEFAULT_DB_PATH)
         if db_file.exists():
             db_size = db_file.stat().st_size / (1024 * 1024)
             print(f"\nDatabase: {db_file}")

@@ -47,8 +47,8 @@ English | [中文](README_zh.md)
 
 ```
 data/
-├── simtradedata.duckdb          # DuckDB database - A-shares (download source)
-├── us_stocks.duckdb             # DuckDB database - US stocks (download source)
+├── cn.duckdb          # DuckDB database - A-shares (download source)
+├── us.duckdb             # DuckDB database - US stocks (download source)
 └── export/                      # Exported Parquet files (by market)
     ├── cn/                      # A-shares export
     │   ├── stocks/              # Daily bars (one file per stock)
@@ -197,7 +197,7 @@ poetry run python scripts/download_us.py --skip-fundamentals --skip-metadata
 poetry run python scripts/download_us.py --start-date 2020-01-01
 ```
 
-US stock ticker format: `AAPL.US` (consistent with A-shares `600000.SS` using `{code}.{market}`), stored in a separate database `data/us_stocks.duckdb`.
+US stock ticker format: `AAPL.US` (consistent with A-shares `600000.SS` using `{code}.{market}`), stored in a separate database `data/us.duckdb`.
 
 **TDX Official Data Package (Fastest Way to Get Full Historical Data)**
 
@@ -288,8 +288,8 @@ SimTradeData/
 │       ├── code_utils.py        # Stock code conversion
 │       └── ttm_calculator.py    # Quarterly range calculation
 ├── data/                        # Data directory (gitignored)
-│   ├── simtradedata.duckdb      # A-shares DuckDB source
-│   ├── us_stocks.duckdb         # US stocks DuckDB source
+│   ├── cn.duckdb      # A-shares DuckDB source
+│   ├── us.duckdb         # US stocks DuckDB source
 │   └── export/                  # Parquet exports
 │       ├── cn/                  # A-shares export
 │       └── us/                  # US stocks export
@@ -454,7 +454,7 @@ poetry run python scripts/test_smart_router_live.py
 ### v0.6.0 (2026-02-08) - US Stock Support
 - Added yfinance data source supporting 6,000+ US common stocks
 - US stock ticker format `AAPL.US`, consistent with A-shares `{code}.{market}`
-- Separate database `data/us_stocks.duckdb`, isolated from A-share data
+- Separate database `data/us.duckdb`, isolated from A-share data
 - 5-phase download: stock list -> bulk OHLCV -> financials+valuation -> metadata+corporate actions -> global data
 - `yf.download()` batch market data (50 per batch) for efficiency
 - S&P 500 / NASDAQ-100 index constituents (scraped from Wikipedia)

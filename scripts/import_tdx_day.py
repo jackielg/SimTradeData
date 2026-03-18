@@ -22,7 +22,7 @@ Usage:
     poetry run python scripts/import_tdx_day.py hsjday.zip --full
 
     # Specify database path
-    poetry run python scripts/import_tdx_day.py hsjday.zip --db data/simtradedata.duckdb
+    poetry run python scripts/import_tdx_day.py hsjday.zip --db data/cn.duckdb
 """
 
 import argparse

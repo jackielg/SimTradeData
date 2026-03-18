@@ -15,9 +15,11 @@ from typing import List, Optional
 import duckdb
 import pandas as pd
 
+from simtradedata.utils.paths import DUCKDB_PATH
+
 logger = logging.getLogger(__name__)
 
-DEFAULT_DB_PATH = "data/simtradedata.duckdb"
+DEFAULT_DB_PATH = str(DUCKDB_PATH)
 
 
 class DuckDBWriter:

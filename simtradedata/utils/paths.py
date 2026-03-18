@@ -42,6 +42,7 @@ PROJECT_ROOT = get_project_root()
 DATA_PATH = get_data_path()
 STRATEGIES_PATH = get_strategies_path()
 
-# DuckDB database path
-DUCKDB_PATH = DATA_PATH / "simtradedata.duckdb"
+# DuckDB database paths
+DUCKDB_PATH = DATA_PATH / "cn.duckdb"
+US_DUCKDB_PATH = DATA_PATH / "us.duckdb"
 

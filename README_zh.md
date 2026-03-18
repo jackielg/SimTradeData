@@ -47,8 +47,8 @@
 
 ```
 data/
-├── simtradedata.duckdb          # DuckDB 数据库 - A股（下载源）
-├── us_stocks.duckdb             # DuckDB 数据库 - 美股（下载源）
+├── cn.duckdb          # DuckDB 数据库 - A股（下载源）
+├── us.duckdb             # DuckDB 数据库 - 美股（下载源）
 └── export/                      # 导出的 Parquet 文件（按市场分目录）
     ├── cn/                      # A股导出
     │   ├── stocks/              # 日线行情（每只股票一个文件）
@@ -197,7 +197,7 @@ poetry run python scripts/download_us.py --skip-fundamentals --skip-metadata
 poetry run python scripts/download_us.py --start-date 2020-01-01
 ```
 
-美股代码格式：`AAPL.US`（与 A 股 `600000.SS` 保持 `{code}.{market}` 一致），数据存入独立数据库 `data/us_stocks.duckdb`。
+美股代码格式：`AAPL.US`（与 A 股 `600000.SS` 保持 `{code}.{market}` 一致），数据存入独立数据库 `data/us.duckdb`。
 
 **TDX 官方数据包（最快获取完整历史行情）**
 
@@ -449,7 +449,7 @@ poetry run python scripts/test_smart_router_live.py
 ### v0.6.0 (2026-02-08) - 美股数据支持
 - 新增 yfinance 数据源，支持 6000+ 只美股普通股
 - 美股代码格式 `AAPL.US`，与 A 股 `{code}.{market}` 一致
-- 独立数据库 `data/us_stocks.duckdb`，与 A 股数据隔离
+- 独立数据库 `data/us.duckdb`，与 A 股数据隔离
 - 5 阶段下载：股票列表 → 批量 OHLCV → 财务+估值 → 元数据+除权 → 全局数据
 - `yf.download()` 批量获取行情（每批 50 只），效率高
 - 支持 S&P 500 / NASDAQ-100 指数成分股（Wikipedia 爬取）

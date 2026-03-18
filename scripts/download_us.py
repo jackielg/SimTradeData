@@ -9,7 +9,7 @@ Uses yfinance to fetch US stock data:
 - Phase 4: Per-stock metadata + exrights
 - Phase 5: Benchmark + trade_days + index_constituents
 
-Output: DuckDB database (data/us_stocks.duckdb)
+Output: DuckDB database (data/us.duckdb)
 """
 
 import argparse
@@ -24,11 +24,11 @@ import pandas as pd
 from tqdm import tqdm
 
 from simtradedata.fetchers.yfinance_fetcher import YFinanceFetcher
+from simtradedata.utils.paths import US_DUCKDB_PATH
 from simtradedata.writers.duckdb_writer import DuckDBWriter
 
 # Configuration
 OUTPUT_DIR = "data"
-DB_FILENAME = "us_stocks.duckdb"
 LOG_FILE = "data/download_us.log"
 LOCK_FILE = "data/.download_us.lock"
 
@@ -414,7 +414,7 @@ def download_us_data(
                 else:
                     ptrade_symbols.append(s)
 
-        db_path = Path(OUTPUT_DIR) / DB_FILENAME
+        db_path = US_DUCKDB_PATH
         downloader = USDownloader(db_path=str(db_path), symbols=ptrade_symbols)
 
         try:

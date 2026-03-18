@@ -13,6 +13,7 @@ import argparse
 import logging
 from pathlib import Path
 
+from simtradedata.utils.paths import DUCKDB_PATH, US_DUCKDB_PATH
 from simtradedata.writers.duckdb_writer import DuckDBWriter
 
 logging.basicConfig(
@@ -22,31 +23,23 @@ logging.basicConfig(
 
 # market → DuckDB path
 DB_PATHS = {
-    "cn": "data/cn.duckdb",
-    "us": "data/us.duckdb",
+    "cn": str(DUCKDB_PATH),
+    "us": str(US_DUCKDB_PATH),
 }
 
 # Legacy DB names → canonical names (for auto-migration)
 _LEGACY_DB = {
-    "data/simtradedata.duckdb": "data/cn.duckdb",
-    "data/us_stocks.duckdb": "data/us.duckdb",
+    "data/simtradedata.duckdb": str(DUCKDB_PATH),
+    "data/us_stocks.duckdb": str(US_DUCKDB_PATH),
 }
 
 
 def _resolve_db(market: str) -> str:
     """Resolve DB path, preferring the one with actual data."""
     canonical = DB_PATHS[market]
-    # Check legacy names first — prefer the larger file (has actual data)
-    for legacy, target in _LEGACY_DB.items():
-        if target == canonical and Path(legacy).exists():
-            if not Path(canonical).exists():
-                return legacy
-            # Both exist: prefer larger file
-            if Path(legacy).stat().st_size > Path(canonical).stat().st_size:
-                return legacy
     if Path(canonical).exists():
         return canonical
-    return canonical
+    # Check legacy names as fallback
     for legacy, target in _LEGACY_DB.items():
         if target == canonical and Path(legacy).exists():
             return legacy

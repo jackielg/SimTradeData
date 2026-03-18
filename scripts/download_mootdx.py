@@ -10,7 +10,7 @@ Complements download_efficient.py (BaoStock) by fetching data from mootdx:
 - Trading calendar (derived from index data)
 - Benchmark index data
 
-Output: DuckDB database (data/simtradedata.duckdb)
+Output: DuckDB database (data/cn.duckdb)
 """
 
 import argparse
@@ -494,7 +494,7 @@ def download_all_data(
         print(f"\nDate range: {start_date_str} ~ {end_date_str}")
 
         # Initialize downloader
-        db_path = Path(OUTPUT_DIR) / "simtradedata.duckdb"
+        db_path = Path(DEFAULT_DB_PATH)
         downloader = MootdxDownloader(
             db_path=str(db_path),
             skip_fundamentals=skip_fundamentals,
@@ -698,7 +698,7 @@ def download_all_data(
         print("Download Complete!")
         print("=" * 70)
 
-        db_file = Path(OUTPUT_DIR) / "simtradedata.duckdb"
+        db_file = Path(DEFAULT_DB_PATH)
         if db_file.exists():
             db_size = db_file.stat().st_size / (1024 * 1024)
             print(f"\nDatabase: {db_file}")

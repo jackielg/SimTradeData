@@ -16,7 +16,9 @@ from pathlib import Path
 
 import duckdb
 
-DB_PATH = "data/simtradedata.duckdb"
+from simtradedata.utils.paths import DUCKDB_PATH
+
+DB_PATH = str(DUCKDB_PATH)
 
 
 def get_a_share_filter(col: str = "symbol") -> str:
