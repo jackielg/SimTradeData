@@ -1077,7 +1077,7 @@ class DuckDBWriter:
             else:
                 self.conn.execute(f"""
                     COPY (
-                        SELECT * EXCLUDE (symbol) REPLACE (date::TIMESTAMP AS date) FROM {table}
+                        SELECT * EXCLUDE (symbol) REPLACE (date::TIMESTAMP_NS AS date) FROM {table}
                         WHERE symbol = '{symbol_escaped}'
                         ORDER BY date
                     ) TO '{output_file}' (FORMAT PARQUET, CODEC 'ZSTD')
@@ -1090,7 +1090,7 @@ class DuckDBWriter:
         import numpy as np
 
         df = self.conn.execute(f"""
-            SELECT * EXCLUDE (symbol) REPLACE (date::TIMESTAMP AS date)
+            SELECT * EXCLUDE (symbol) REPLACE (date::TIMESTAMP_NS AS date)
             FROM exrights WHERE symbol = '{symbol_escaped}' ORDER BY date
         """).fetchdf()
 
@@ -1132,7 +1132,7 @@ class DuckDBWriter:
         # CTE fills missing preclose with previous day's close
         base_cte = f"""
             WITH filled AS (
-                SELECT date::TIMESTAMP AS date, open, close, high, low,
+                SELECT date::TIMESTAMP_NS AS date, open, close, high, low,
                     COALESCE(preclose, LAG(close) OVER (ORDER BY date)) AS preclose,
                     volume, money
                 FROM stocks
@@ -1203,7 +1203,7 @@ class DuckDBWriter:
         self.conn.execute(f"""
             COPY (
                 SELECT
-                    date::TIMESTAMP AS date, publ_date,
+                    date::TIMESTAMP_NS AS date, publ_date,
                     operating_revenue_grow_rate, net_profit_grow_rate,
                     basic_eps_yoy, np_parent_company_yoy,
                     net_profit_ratio,
@@ -1243,7 +1243,7 @@ class DuckDBWriter:
             COPY (
                 WITH daily_data AS (
                     SELECT
-                        v.date::TIMESTAMP AS date,
+                        v.date::TIMESTAMP_NS AS date,
                         v.pe_ttm,
                         v.pb,
                         v.ps_ttm,
