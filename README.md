@@ -1,4 +1,4 @@
-English | [中文](README_zh.md)
+English | [中文](README_zh.md) | [Deutsch](README_de.md)
 
 # SimTradeData - Quantitative Trading Data Downloader
 

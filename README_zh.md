@@ -1,4 +1,4 @@
-[English](README.md) | 中文
+[English](README.md) | 中文 | [Deutsch](README_de.md)
 
 # SimTradeData - 高效量化交易数据下载工具
 
