@@ -1,6 +1,6 @@
 [project]
 name = "simtradedata"
-version = "1.1.0"
+version = "1.2.0"
 description = "为 simtradelab 项目提供数据支持的配套工具库"
 authors = [
     {name = "kayou",email = "kayou@duck.com"}

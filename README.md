@@ -2,6 +2,14 @@ English | [中文](README_zh.md) | [Deutsch](README_de.md)
 
 # SimTradeData - Quantitative Trading Data Downloader
 
+[![Python 3.10+](https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-red.svg)](LICENSE)
+[![Version](https://img.shields.io/badge/Version-1.2.0-brightgreen.svg)](CHANGELOG.md)
+[![DuckDB](https://img.shields.io/badge/Storage-DuckDB-FFF000?logo=duckdb&logoColor=black)](https://duckdb.org/)
+[![Parquet](https://img.shields.io/badge/Export-Parquet-50ABF1)](https://parquet.apache.org/)
+[![Code Style: Black](https://img.shields.io/badge/Code%20Style-Black-000000.svg)](https://github.com/psf/black)
+[![Poetry](https://img.shields.io/badge/Packaging-Poetry-60A5FA?logo=poetry&logoColor=white)](https://python-poetry.org/)
+
 > **BaoStock + Mootdx + EastMoney + yfinance Multi-Source** | **China A-Shares + US Stocks** | **PTrade Compatible** | **DuckDB + Parquet Storage**
 
 **SimTradeData** is an efficient data download tool designed for [SimTradeLab](https://github.com/kay-ou/SimTradeLab). It supports China A-shares (BaoStock, Mootdx, EastMoney) and US stocks (yfinance) from multiple data sources, automatically orchestrating each source's strengths. Data is stored in DuckDB as intermediate storage and exported to Parquet format, with efficient incremental updates and querying.
@@ -68,6 +76,12 @@ data/
         ├── metadata/
         └── manifest.json
 ```
+
+## Prerequisites
+
+- **Python**: 3.10 or higher
+- **Poetry**: [Installation guide](https://python-poetry.org/docs/#installation)
+- **Network**: Required for downloading data from BaoStock/Mootdx/EastMoney/yfinance (China mainland network recommended for A-share data)
 
 ## Quick Start
 
@@ -429,63 +443,9 @@ poetry run python scripts/test_smart_router_live.py
 
 ## Version History
 
-### v1.2.0 (2026-03-13) - Smart Data Source Router
-- Added SmartRouter unified data access layer
-- Auto-selects best data source by data type and market
-- Static priority + circuit breaker health-aware, auto fallback on failure
-- Supports 13 data types: daily bars, XDXR, fundamentals, valuation, money flow, LHB, margin trading, etc.
-- Added EastMoney as A-share daily bars fallback source
-- Output column normalization: consistent column structure regardless of source
+See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
-### v1.1.0 (2026-03-10) - TDX Fast Import Integration
-- Added `--tdx-download` flag: auto-download TDX official daily data package and import
-- Added `--tdx-source` flag: import TDX daily data from local ZIP file or directory
-- First-time download of 6,000+ stocks OHLCV reduced from hours to minutes
-- TDX import runs as Phase 0 before Mootdx phase
-- Fixed corporate actions not being downloaded after TDX bulk import
-- Corporate actions now check per-symbol existence independently of OHLCV incremental logic
-
-### v0.6.0 (2026-02-08) - US Stock Support
-- Added yfinance data source supporting 6,000+ US common stocks
-- US stock ticker format `AAPL.US`, consistent with A-shares `{code}.{market}`
-- Separate database `data/us.duckdb`, isolated from A-share data
-- 5-phase download: stock list -> bulk OHLCV -> financials+valuation -> metadata+corporate actions -> global data
-- `yf.download()` batch market data (50 per batch) for efficiency
-- S&P 500 / NASDAQ-100 index constituents (scraped from Wikipedia)
-- Incremental updates: reuses `get_max_date()` logic, only downloads new data
-
-### v0.5.0 (2026-02-01) - Unified Download Command
-- Added `scripts/download.py` unified download entry point
-- Automatic orchestration of Mootdx and BaoStock sources, leveraging strengths
-- Optimized incremental detection: skips all stocks in seconds when no new trading days
-- Financial data incremental: detects changes via remote file hash
-- Index constituents incremental: tracks downloaded months to avoid duplicates
-- Fixed Mootdx Affair API return value handling
-- Fixed DuckDB `changes()` function compatibility
-- Auto-filters empty rows for suspended stocks
-
-### v0.4.0 (2026-01-30) - DuckDB + Parquet Architecture
-- Migrated storage from HDF5 to DuckDB + Parquet
-- Added limit-up/down price calculation (computed at export from preclose)
-- Added TTM metric calculation (SQL window functions at export)
-- Added corporate action data download
-- Added share capital data (total_shares/a_floats)
-- Optimized incremental update logic
-- Cleaned up deprecated code and docs
-
-### v0.3.0 (2025-11-24) - Quality & Architecture Optimization
-- Implemented market cap field calculation
-- Fixed TTM metric calculation
-- Added data validator
-- Extracted BaseFetcher base class
-
-### v0.2.0 (2025-11-22) - Performance Optimization
-- Implemented unified data fetching, reducing API calls by 33%
-- Optimized HDF5 write logic
-
-### v0.1.0 (2024-11-14) - Initial Release
-- Basic data download functionality
-- BaoStock data source integration
+**Latest**: v1.2.0 (2026-03-13) - Smart Data Source Router
 
 ## Related Links
 

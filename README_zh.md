@@ -2,6 +2,14 @@
 
 # SimTradeData - 高效量化交易数据下载工具
 
+[![Python 3.10+](https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-red.svg)](LICENSE)
+[![Version](https://img.shields.io/badge/Version-1.2.0-brightgreen.svg)](CHANGELOG.md)
+[![DuckDB](https://img.shields.io/badge/Storage-DuckDB-FFF000?logo=duckdb&logoColor=black)](https://duckdb.org/)
+[![Parquet](https://img.shields.io/badge/Export-Parquet-50ABF1)](https://parquet.apache.org/)
+[![Code Style: Black](https://img.shields.io/badge/Code%20Style-Black-000000.svg)](https://github.com/psf/black)
+[![Poetry](https://img.shields.io/badge/Packaging-Poetry-60A5FA?logo=poetry&logoColor=white)](https://python-poetry.org/)
+
 > **BaoStock + Mootdx + EastMoney + yfinance 多数据源** | **A股 + 美股** | **PTrade格式兼容** | **DuckDB + Parquet存储**
 
 **SimTradeData** 是为 [SimTradeLab](https://github.com/kay-ou/SimTradeLab) 设计的高效数据下载工具。支持 A 股（BaoStock、Mootdx、EastMoney）和美股（yfinance）多数据源，各取所长自动编排，采用 DuckDB 作为中间存储，导出为 Parquet 格式，支持高效的增量更新和数据查询。
@@ -68,6 +76,12 @@ data/
         ├── metadata/
         └── manifest.json
 ```
+
+## 前置条件
+
+- **Python**: 3.10 或更高版本
+- **Poetry**: [安装指南](https://python-poetry.org/docs/#installation)
+- **网络**: 下载数据需要网络（A 股数据建议使用中国大陆网络）
 
 ## 快速开始
 
@@ -424,63 +438,9 @@ poetry run python scripts/test_smart_router_live.py
 
 ## 版本历史
 
-### v1.2.0 (2026-03-13) - 智能数据源路由
-- 新增 SmartRouter 统一数据访问层
-- 自动根据数据类型和市场选择最佳数据源
-- 静态优先级 + 熔断器健康感知，主源失败自动 fallback
-- 支持 13 种数据类型：日线、XDXR、财务、估值、资金流向、龙虎榜、融资融券等
-- 新增 EastMoney 数据源作为 A 股日线 fallback
-- 输出列标准化：无论使用哪个数据源，返回一致的列结构
+完整版本历史请查看 [CHANGELOG.md](CHANGELOG.md)。
 
-### v1.1.0 (2026-03-10) - TDX 快速导入集成
-- 新增 `--tdx-download` 参数：自动下载 TDX 官方沪深日线包并导入
-- 新增 `--tdx-source` 参数：从本地 ZIP 文件或目录导入 TDX 日线数据
-- 首次下载 6000+ 只股票 OHLCV 从数小时缩短到几分钟
-- TDX 导入作为 Phase 0 在 Mootdx 阶段之前自动执行
-- 修复 TDX 导入后除权除息无法补充下载的问题
-- 除权除息改为按个股检查是否缺失，独立于 OHLCV 增量逻辑
-
-### v0.6.0 (2026-02-08) - 美股数据支持
-- 新增 yfinance 数据源，支持 6000+ 只美股普通股
-- 美股代码格式 `AAPL.US`，与 A 股 `{code}.{market}` 一致
-- 独立数据库 `data/us.duckdb`，与 A 股数据隔离
-- 5 阶段下载：股票列表 → 批量 OHLCV → 财务+估值 → 元数据+除权 → 全局数据
-- `yf.download()` 批量获取行情（每批 50 只），效率高
-- 支持 S&P 500 / NASDAQ-100 指数成分股（Wikipedia 爬取）
-- 增量更新：复用 `get_max_date()` 逻辑，仅下载新数据
-
-### v0.5.0 (2026-02-01) - 统一下载命令
-- 新增 `scripts/download.py` 统一下载入口
-- 自动编排 Mootdx 和 BaoStock 数据源，各取所长
-- 优化增量检测：无新交易日时秒级跳过全部股票
-- 财务数据增量：基于远程文件 hash 检测变更
-- 指数成分股增量：记录已下载月份避免重复
-- 修复 Mootdx Affair API 返回值处理
-- 修复 DuckDB `changes()` 函数兼容性
-- 自动过滤停牌股票的空行数据
-
-### v0.4.0 (2026-01-30) - DuckDB + Parquet 架构
-- 存储格式从 HDF5 迁移到 DuckDB + Parquet
-- 添加涨跌停价计算（导出时基于 preclose）
-- 添加 TTM 指标计算（导出时用 SQL window function）
-- 添加除权除息数据下载
-- 添加股本数据（total_shares/a_floats）
-- 优化增量更新逻辑
-- 清理废弃代码和文档
-
-### v0.3.0 (2025-11-24) - 质量与架构优化版
-- 实现市值字段计算
-- 修复 TTM 指标计算
-- 添加数据验证器
-- 提取 BaseFetcher 基类
-
-### v0.2.0 (2025-11-22) - 性能优化版
-- 实现统一数据获取，API 调用减少 33%
-- 优化 HDF5 写入逻辑
-
-### v0.1.0 (2024-11-14) - 初始版本
-- 基础数据下载功能
-- BaoStock 数据源集成
+**最新版本**: v1.2.0 (2026-03-13) - 智能数据源路由
 
 ## 相关链接
 

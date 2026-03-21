@@ -2,6 +2,14 @@
 
 # SimTradeData - Quantitativer Handelsdaten-Downloader
 
+[![Python 3.10+](https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-red.svg)](LICENSE)
+[![Version](https://img.shields.io/badge/Version-1.2.0-brightgreen.svg)](CHANGELOG.md)
+[![DuckDB](https://img.shields.io/badge/Storage-DuckDB-FFF000?logo=duckdb&logoColor=black)](https://duckdb.org/)
+[![Parquet](https://img.shields.io/badge/Export-Parquet-50ABF1)](https://parquet.apache.org/)
+[![Code Style: Black](https://img.shields.io/badge/Code%20Style-Black-000000.svg)](https://github.com/psf/black)
+[![Poetry](https://img.shields.io/badge/Packaging-Poetry-60A5FA?logo=poetry&logoColor=white)](https://python-poetry.org/)
+
 > **BaoStock + Mootdx + EastMoney + yfinance Multi-Quelle** | **Chinesische A-Aktien + US-Aktien** | **PTrade-kompatibel** | **DuckDB + Parquet-Speicherung**
 
 **SimTradeData** ist ein effizientes Daten-Download-Tool für [SimTradeLab](https://github.com/kay-ou/SimTradeLab). Es unterstützt chinesische A-Aktien (BaoStock, Mootdx, EastMoney) und US-Aktien (yfinance) aus mehreren Datenquellen mit automatischer Orchestrierung der jeweiligen Stärken. Daten werden in DuckDB als Zwischenspeicher gespeichert und ins Parquet-Format exportiert, mit effizienten inkrementellen Updates und Abfragen.
@@ -68,6 +76,12 @@ data/
         ├── metadata/
         └── manifest.json
 ```
+
+## Voraussetzungen
+
+- **Python**: 3.10 oder höher
+- **Poetry**: [Installationsanleitung](https://python-poetry.org/docs/#installation)
+- **Netzwerk**: Zum Herunterladen von Daten erforderlich (für A-Aktien-Daten wird ein chinesisches Festlandnetzwerk empfohlen)
 
 ## Schnellstart
 
