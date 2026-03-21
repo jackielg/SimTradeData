@@ -1876,21 +1876,46 @@ class DuckDBWriter:
                 (FORMAT PARQUET, CODEC 'ZSTD')
             """)
 
-        # benchmark.parquet
-        count = self.conn.execute("SELECT COUNT(*) FROM benchmark").fetchone()[0]
-        if count > 0:
-            self.conn.execute(f"""
-                COPY (SELECT * FROM benchmark ORDER BY date)
-                TO '{output_dir / "benchmark.parquet"}' (FORMAT PARQUET, CODEC 'ZSTD')
-            """)
+        # benchmark.parquet — prefer stocks table for full history,
+        # fall back to benchmark table for recent data only
+        benchmark_symbol = '000300.SS'
+        has_stocks_benchmark = self.conn.execute(
+            f"SELECT COUNT(*) FROM stocks WHERE symbol = '{benchmark_symbol}'"
+        ).fetchone()[0]
 
-        # trade_days.parquet
-        count = self.conn.execute("SELECT COUNT(*) FROM trade_days").fetchone()[0]
-        if count > 0:
+        if has_stocks_benchmark > 0:
             self.conn.execute(f"""
-                COPY (SELECT * FROM trade_days ORDER BY date)
-                TO '{output_dir / "trade_days.parquet"}' (FORMAT PARQUET, CODEC 'ZSTD')
+                COPY (
+                    SELECT date, open, high, low, close, volume,
+                           COALESCE(money, 0.0) AS money
+                    FROM stocks
+                    WHERE symbol = '{benchmark_symbol}'
+                    ORDER BY date
+                ) TO '{output_dir / "benchmark.parquet"}' (FORMAT PARQUET, CODEC 'ZSTD')
             """)
+        else:
+            count = self.conn.execute(
+                "SELECT COUNT(*) FROM benchmark"
+            ).fetchone()[0]
+            if count > 0:
+                self.conn.execute(f"""
+                    COPY (SELECT * FROM benchmark ORDER BY date)
+                    TO '{output_dir / "benchmark.parquet"}'
+                    (FORMAT PARQUET, CODEC 'ZSTD')
+                """)
+
+        # trade_days.parquet — merge DB trade_days with dates from stocks table
+        # The trade_days table may only have recent dates (from mootdx),
+        # but stocks table has full history back to 1991.
+        self.conn.execute(f"""
+            COPY (
+                SELECT DISTINCT date FROM (
+                    SELECT date FROM trade_days
+                    UNION
+                    SELECT DISTINCT date FROM stocks
+                ) ORDER BY date
+            ) TO '{output_dir / "trade_days.parquet"}' (FORMAT PARQUET, CODEC 'ZSTD')
+        """)
 
         # index_constituents.parquet
         count = self.conn.execute("SELECT COUNT(*) FROM index_constituents").fetchone()[
