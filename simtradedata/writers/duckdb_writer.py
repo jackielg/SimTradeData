@@ -1046,9 +1046,9 @@ class DuckDBWriter:
         self._export_valuation_batch(output_path / "valuation")
 
         logger.info("Exporting metadata...")
-        self._export_metadata(output_path / "metadata")
+        self._export_metadata(output_path / "metadata", market=market)
 
-        self._write_manifest(output_path)
+        self._write_manifest(output_path, market=market)
 
         logger.info(f"Export complete: {output_path}")
 
@@ -1861,7 +1861,7 @@ class DuckDBWriter:
             f"{halt_count} date entries in {time.time() - t0:.1f}s"
         )
 
-    def _export_metadata(self, output_dir: Path) -> None:
+    def _export_metadata(self, output_dir: Path, market: str = "cn") -> None:
         """Export metadata tables using DuckDB COPY"""
 
         # Before exporting stock_metadata, ensure it's populated from stock_pool
@@ -1943,10 +1943,11 @@ class DuckDBWriter:
             """)
 
         # version.parquet
-        result = self.conn.execute("""
+        cn_filter = f"WHERE {self._CN_STOCK_FILTER}" if market == "cn" else ""
+        result = self.conn.execute(f"""
             SELECT
                 (SELECT MAX(date)::VARCHAR FROM stocks) as version,
-                (SELECT COUNT(DISTINCT symbol) FROM stocks) as num_stocks,
+                (SELECT COUNT(DISTINCT symbol) FROM stocks {cn_filter}) as num_stocks,
                 CURRENT_DATE as export_date,
                 (SELECT MIN(date)::VARCHAR FROM stocks) as start_date
         """).fetchone()
@@ -1964,11 +1965,12 @@ class DuckDBWriter:
         version_data.to_parquet(output_dir / "version.parquet", index=False)
 
 
-    def _write_manifest(self, output_dir: Path) -> None:
+    def _write_manifest(self, output_dir: Path, market: str = "cn") -> None:
         """Write manifest.json"""
-        result = self.conn.execute("""
+        cn_filter = f"WHERE {self._CN_STOCK_FILTER}" if market == "cn" else ""
+        result = self.conn.execute(f"""
             SELECT MIN(date), MAX(date), COUNT(DISTINCT symbol)
-            FROM stocks
+            FROM stocks {cn_filter}
         """).fetchone()
 
         start_date = str(result[0]) if result[0] else ""
