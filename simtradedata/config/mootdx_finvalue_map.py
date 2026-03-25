@@ -81,7 +81,7 @@ FINVALUE_TO_PTRADE = {
 
     # Share capital
     238: ("total_shares", "Total shares", "shares"),
-    239: ("float_a_shares", "Float A shares", "shares"),
+    239: ("a_floats", "Float A shares (listed circulating)", "shares"),
     242: ("shareholder_count", "Number of shareholders", "count"),
 
     # TTM indicators
@@ -122,6 +122,7 @@ CORE_FUNDAMENTAL_FIELDS = [
 
     # Share data
     "total_shares",
+    "a_floats",
 ]
 
 

@@ -623,9 +623,18 @@ class DuckDBWriter:
         df = df[available]
 
         cols_str = ", ".join(available)
+        # Use ON CONFLICT to only update columns present in the DataFrame,
+        # preserving existing values for columns not in this write batch.
+        update_cols = [c for c in available if c not in ("symbol", "date")]
+        if update_cols:
+            set_clause = ", ".join(f"{c} = EXCLUDED.{c}" for c in update_cols)
+            conflict_clause = f"ON CONFLICT (symbol, date) DO UPDATE SET {set_clause}"
+        else:
+            conflict_clause = "ON CONFLICT (symbol, date) DO NOTHING"
         self.conn.execute(f"""
-            INSERT OR REPLACE INTO fundamentals ({cols_str})
+            INSERT INTO fundamentals ({cols_str})
             SELECT {cols_str} FROM df
+            {conflict_clause}
         """)
 
         logger.debug(f"Wrote {len(df)} fundamental rows for {symbol}")
@@ -1235,6 +1244,10 @@ class DuckDBWriter:
                 f.roe, f.roe_ttm, f.roa, f.roa_ttm,
                 CASE WHEN v.pb > 0 THEN ROUND(s.close / v.pb, 4) ELSE NULL END AS naps,
                 f.total_shares, f.a_floats,
+                CASE WHEN f.total_shares > 0 AND s.close IS NOT NULL
+                     THEN ROUND(f.total_shares * s.close, 2) END AS total_value,
+                CASE WHEN f.a_floats > 0 AND s.close IS NOT NULL
+                     THEN ROUND(f.a_floats * s.close, 2) END AS float_value,
                 v.turnover_rate
             FROM valuation v
             ASOF JOIN (SELECT symbol, date, close FROM stocks) s
@@ -1613,6 +1626,7 @@ class DuckDBWriter:
         """
         Export valuation data with enriched fields:
         - total_shares, a_floats: forward filled from fundamentals
+        - total_value, float_value: market cap computed as shares * close
         - roe, roa, roe_ttm, roa_ttm: forward filled from fundamentals
         - naps: calculated as close / pb (derived from pbMRQ definition)
 
@@ -1627,6 +1641,10 @@ class DuckDBWriter:
                     CASE WHEN v.pb > 0 THEN ROUND(s.close / v.pb, 4)
                          ELSE NULL END AS naps,
                     f.total_shares, f.a_floats,
+                    CASE WHEN f.total_shares > 0 AND s.close IS NOT NULL
+                         THEN ROUND(f.total_shares * s.close, 2) END AS total_value,
+                    CASE WHEN f.a_floats > 0 AND s.close IS NOT NULL
+                         THEN ROUND(f.a_floats * s.close, 2) END AS float_value,
                     v.turnover_rate
                 FROM valuation v
                 ASOF JOIN stocks s
