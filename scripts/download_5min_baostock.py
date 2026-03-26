@@ -161,7 +161,7 @@ def download_data(args):
 
             # Retry logic for network issues
             attempts = 0
-            while attempts <= max_retries:
+            while attempts <= MAX_RETRIES:
                 try:
                     # Fetch data
                     df = fetcher.fetch_5min_bars(
