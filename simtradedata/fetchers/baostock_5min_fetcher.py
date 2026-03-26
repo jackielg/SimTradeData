@@ -6,6 +6,7 @@ BaoStock 5-minute data fetcher
 """
 
 import logging
+import threading
 from datetime import datetime
 from typing import List, Optional
 
@@ -20,6 +21,9 @@ logger = logging.getLogger(__name__)
 # 5 分钟数据字段
 MINUTE_FIELDS = "date,time,code,open,high,low,close,volume,amount,adjustflag"
 
+# Timeout configuration
+DEFAULT_TIMEOUT = 30  # seconds
+
 
 class BaoStock5MinFetcher(BaoStockFetcher):
     """
@@ -31,9 +35,53 @@ class BaoStock5MinFetcher(BaoStockFetcher):
     - Convert to PTrade format
     """
 
-    def __init__(self):
-        """Initialize 5-minute fetcher"""
+    def __init__(self, timeout: int = DEFAULT_TIMEOUT):
+        """Initialize 5-minute fetcher
+
+        Args:
+            timeout: Timeout in seconds for each query (default: 30)
+        """
         super().__init__()
+        self.timeout = timeout
+        logger.info(f"BaoStock5MinFetcher initialized with timeout={timeout}s")
+
+    def _execute_with_timeout(self, func, *args, **kwargs):
+        """
+        Execute a function with timeout protection
+
+        Args:
+            func: Function to execute
+            *args: Positional arguments for func
+            **kwargs: Keyword arguments for func
+
+        Returns:
+            Result from func
+
+        Raises:
+            TimeoutError: If function execution exceeds timeout
+        """
+        result = [None]
+        exception = [None]
+
+        def target():
+            try:
+                result[0] = func(*args, **kwargs)
+            except Exception as e:
+                exception[0] = e
+
+        thread = threading.Thread(target=target)
+        thread.daemon = True
+        thread.start()
+        thread.join(self.timeout)
+
+        if thread.is_alive():
+            logger.warning(f"Function execution timeout after {self.timeout} seconds")
+            raise TimeoutError(f"Operation timed out after {self.timeout} seconds")
+
+        if exception[0]:
+            raise exception[0]
+
+        return result[0]
 
     @retry_on_failure()
     def fetch_5min_bars(
@@ -66,7 +114,9 @@ class BaoStock5MinFetcher(BaoStockFetcher):
         )
 
         try:
-            rs = bs.query_history_k_data_plus(
+            # Execute query with timeout protection
+            rs = self._execute_with_timeout(
+                bs.query_history_k_data_plus,
                 code=bs_code,
                 fields=MINUTE_FIELDS,
                 start_date=start_date,
@@ -79,10 +129,14 @@ class BaoStock5MinFetcher(BaoStockFetcher):
                 logger.error(f"Query failed for {symbol}: {rs.error_msg}")
                 return pd.DataFrame()
 
-            # Fetch all data
+            # Fetch all data with timeout
             data_list = []
-            while (rs.error_code == "0") & rs.next():
-                data_list.append(rs.get_row_data())
+
+            def fetch_all_rows():
+                while (rs.error_code == "0") & rs.next():
+                    data_list.append(rs.get_row_data())
+
+            self._execute_with_timeout(fetch_all_rows)
 
             if not data_list:
                 logger.warning(
@@ -102,8 +156,7 @@ class BaoStock5MinFetcher(BaoStockFetcher):
             # Build datetime index from time field
             # time format: YYYYMMDDHHMMSSsss (17 digits with milliseconds)
             # Truncate to 14 digits (YYYYMMDDHHMMSS) for parsing
-            df["time_truncated"] = df["time"].str[:14]
-            df["datetime"] = pd.to_datetime(df["time_truncated"], format="%Y%m%d%H%M%S")
+            df["datetime"] = pd.to_datetime(df["time"].str[:14], format="%Y%m%d%H%M%S")
 
             # Select and rename columns
             result = pd.DataFrame(

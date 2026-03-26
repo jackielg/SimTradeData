@@ -24,14 +24,18 @@ from simtradedata.writers.duckdb_writer_5min import DuckDBWriter5Min
 
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
+    format="%(asctime)s - %(levelname)s - %(message)s",
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler('data/download_5min.log', encoding='utf-8')
-    ]
+        logging.FileHandler(
+            Path(__file__).parent.parent / "data" / "download_5min.log",
+            encoding="utf-8",
+        ),
+    ],
 )
 logger = logging.getLogger(__name__)
 
+# Constants
 DEFAULT_STOCKS = [
     "000001.SZ",  # 平安银行
     "600000.SS",  # 浦发银行
@@ -40,79 +44,79 @@ DEFAULT_STOCKS = [
     "000858.SZ",  # 五粮液
     "601318.SS",  # 中国平安
     "600036.SS",  # 招商银行
-    "000002.SZ",  # 万科A
+    "000002.SZ",  # 万科 A
 ]
+
+# Retry configuration
+MAX_RETRIES = 3
+BASE_WAIT_TIME = 2  # seconds
+NETWORK_ERROR_WAIT_MULTIPLIER = 5
+CONSECUTIVE_FAILURES_THRESHOLD = 10
+LONG_WAIT_TIME = 60  # seconds
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description='Download 5-minute stock data from BaoStock')
-    
+    parser = argparse.ArgumentParser(
+        description="Download 5-minute stock data from BaoStock"
+    )
+
     parser.add_argument(
-        '--start-date',
+        "--start-date", type=str, default="2025-04-01", help="Start date (YYYY-MM-DD)"
+    )
+    parser.add_argument(
+        "--end-date", type=str, default="2025-04-30", help="End date (YYYY-MM-DD)"
+    )
+    parser.add_argument(
+        "--stocks",
         type=str,
-        default='2025-04-01',
-        help='Start date (YYYY-MM-DD)'
+        help='Comma-separated list of stock codes (e.g., "000001.SZ,600000.SS")',
     )
     parser.add_argument(
-        '--end-date',
+        "--all-stocks",
+        action="store_true",
+        help="Download all A-share stocks (Caution: Large data volume)",
+    )
+    parser.add_argument(
+        "--db-path",
         type=str,
-        default='2025-04-30',
-        help='End date (YYYY-MM-DD)'
+        default="data/simtradedata_5min.duckdb",
+        help="DuckDB database path",
     )
     parser.add_argument(
-        '--stocks',
+        "--delay", type=float, default=1.0, help="Delay between requests (seconds)"
+    )
+    parser.add_argument(
+        "--export-only",
+        action="store_true",
+        help="Only export existing data to parquet",
+    )
+    parser.add_argument(
+        "--output-dir",
         type=str,
-        help='Comma-separated list of stock codes (e.g., "000001.SZ,600000.SS")'
+        default="data/parquet/stocks_5m",
+        help="Output directory for parquet files",
     )
     parser.add_argument(
-        '--all-stocks',
-        action='store_true',
-        help='Download all A-share stocks ( caution: large data volume )'
-    )
-    parser.add_argument(
-        '--db-path',
-        type=str,
-        default='data/simtradedata_5min.duckdb',
-        help='DuckDB database path'
-    )
-    parser.add_argument(
-        '--delay',
-        type=float,
-        default=0.5,
-        help='Delay between requests (seconds)'
-    )
-    parser.add_argument(
-        '--export-only',
-        action='store_true',
-        help='Only export existing data to parquet'
-    )
-    parser.add_argument(
-        '--output-dir',
-        type=str,
-        default='data/parquet/stocks_5m',
-        help='Output directory for parquet files'
-    )
-    parser.add_argument(
-        '--batch-size',
+        "--batch-size",
         type=int,
         default=100,
-        help='Number of stocks to process before committing'
+        help="Number of stocks to process before committing",
     )
-    
+
     return parser.parse_args()
 
 
 def download_data(args):
     """Download 5-minute data"""
-    
+
     # Parse stock list
     if args.stocks:
-        stocks = [s.strip() for s in args.stocks.split(',')]
+        stocks = [s.strip() for s in args.stocks.split(",")]
     elif args.all_stocks:
         stocks = None  # Will fetch all stocks
     else:
         stocks = DEFAULT_STOCKS
-    
+
     logger.info("=" * 60)
     logger.info("BaoStock 5分钟数据下载")
     logger.info("=" * 60)
@@ -120,76 +124,123 @@ def download_data(args):
     logger.info(f"数据库: {args.db_path}")
     logger.info(f"请求延迟: {args.delay}秒")
     logger.info("=" * 60)
-    
-    # Initialize fetcher and writer
-    fetcher = BaoStock5MinFetcher()
+
+    # Initialize fetcher and writer with timeout
+    fetcher = BaoStock5MinFetcher(timeout=30)  # 30 second timeout
     writer = DuckDBWriter5Min(args.db_path)
-    
+
     try:
         fetcher.login()
-        
+
         # Get stock list if downloading all
         if stocks is None:
-            logger.info("获取所有A股列表...")
+            logger.info("获取所有 A 股列表...")
             # Use a known trading day to get stock list
-            bs_stocks = fetcher.get_stock_list(date='2025-04-01')
+            bs_stocks = fetcher.get_stock_list(date="2025-01-15")
             # Convert BaoStock format to PTrade format
             stocks = []
             for bs_code in bs_stocks:
-                if bs_code.startswith('sh.'):
-                    stocks.append(bs_code[3:] + '.SS')
-                elif bs_code.startswith('sz.'):
-                    stocks.append(bs_code[3:] + '.SZ')
+                if bs_code.startswith("sh."):
+                    stocks.append(bs_code[3:] + ".SS")
+                elif bs_code.startswith("sz."):
+                    stocks.append(bs_code[3:] + ".SZ")
             logger.info(f"共 {len(stocks)} 只股票")
-        
+
         # Download data
         total_stocks = len(stocks)
         success_count = 0
         fail_count = 0
         total_records = 0
-        
+        retry_count = 0
+        consecutive_network_errors = 0
+
         writer.begin()
-        
+
         for i, symbol in enumerate(stocks):
             logger.info(f"[{i+1}/{total_stocks}] 下载 {symbol}...")
-            
-            try:
-                # Fetch data
-                df = fetcher.fetch_5min_bars(
-                    symbol=symbol,
-                    start_date=args.start_date,
-                    end_date=args.end_date
-                )
-                
-                if df.empty:
-                    logger.warning(f"  {symbol}: 无数据")
-                    fail_count += 1
-                    continue
-                
-                # Write to database
-                records = writer.write_5min_data(symbol, df)
-                total_records += records
-                
-                logger.info(f"  {symbol}: 写入 {records} 条记录")
-                success_count += 1
-                
-                # Commit every batch
-                if (i + 1) % args.batch_size == 0:
-                    writer.commit()
-                    writer.begin()
-                    logger.info(f"已提交 {i+1} 只股票的数据")
-                
-                # Delay to avoid rate limiting
-                if args.delay > 0 and i < total_stocks - 1:
-                    time.sleep(args.delay)
-                    
-            except Exception as e:
-                logger.error(f"  {symbol}: 下载失败 - {e}")
-                fail_count += 1
-                continue
-        
+
+            # Retry logic for network issues
+            attempts = 0
+            while attempts <= max_retries:
+                try:
+                    # Fetch data
+                    df = fetcher.fetch_5min_bars(
+                        symbol=symbol,
+                        start_date=args.start_date,
+                        end_date=args.end_date,
+                    )
+
+                    if df.empty:
+                        logger.warning(f"  {symbol}: 无数据")
+                        fail_count += 1
+                        break
+
+                    # Write to database
+                    records = writer.write_5min_data(symbol, df)
+                    total_records += records
+
+                    logger.info(f"  {symbol}: 写入 {records} 条记录")
+                    success_count += 1
+
+                    # Reset retry count and consecutive network errors on success
+                    retry_count = 0
+                    consecutive_network_errors = 0
+                    break
+
+                except Exception as e:
+                    attempts += 1
+                    error_msg = str(e)
+                    is_network_error = (
+                        "网络" in error_msg
+                        or "timeout" in error_msg.lower()
+                        or "连接" in error_msg
+                    )
+
+                    if is_network_error:
+                        consecutive_network_errors += 1
+
+                    if attempts <= MAX_RETRIES:
+                        logger.warning(
+                            f"  {symbol}: 下载失败，重试 {attempts}/{MAX_RETRIES} - {e}"
+                        )
+                        retry_count += 1
+                        # Longer delay for network errors
+                        if is_network_error and consecutive_network_errors > 5:
+                            wait_time = NETWORK_ERROR_WAIT_MULTIPLIER * attempts
+                            logger.warning(
+                                f"连续网络错误 {consecutive_network_errors} 次，等待 {wait_time}秒..."
+                            )
+                        else:
+                            wait_time = BASE_WAIT_TIME * attempts
+                        time.sleep(wait_time)
+                    else:
+                        logger.error(f"  {symbol}: 下载失败，已达最大重试次数 - {e}")
+                        fail_count += 1
+                        retry_count += 1
+                        # If too many consecutive failures, wait longer
+                        if retry_count >= CONSECUTIVE_FAILURES_THRESHOLD:
+                            logger.warning(
+                                f"连续失败次数过多，等待 {LONG_WAIT_TIME} 秒..."
+                            )
+                            time.sleep(LONG_WAIT_TIME)
+                            retry_count = 0
+                        # Reset consecutive network error count on failure
+                        if is_network_error:
+                            consecutive_network_errors = 0
+                        continue
+
+            # Commit every batch
+            if (i + 1) % args.batch_size == 0:
+                writer.commit()
+                writer.begin()
+                logger.info(f"已提交 {i+1} 只股票的数据")
+
+            # Delay to avoid rate limiting
+            if args.delay > 0 and i < total_stocks - 1:
+                time.sleep(args.delay)
+
         writer.commit()
-        
+
         # Print summary
         logger.info("\n" + "=" * 60)
         logger.info("下载完成汇总")
@@ -197,18 +248,18 @@ def download_data(args):
         logger.info(f"成功: {success_count} 只")
         logger.info(f"失败: {fail_count} 只")
         logger.info(f"总记录数: {total_records} 条")
-        
+
         # Show database stats
         stats = writer.get_stats()
         logger.info(f"数据库统计:")
         logger.info(f"  总记录数: {stats['total_records']}")
         logger.info(f"  股票数量: {stats['unique_symbols']}")
         logger.info(f"  时间范围: {stats['min_datetime']} ~ {stats['max_datetime']}")
-        
+
     finally:
         fetcher.logout()
         writer.close()
-    
+
     return success_count, fail_count
 
 
@@ -219,37 +270,37 @@ def export_data(args):
     logger.info("=" * 60)
     logger.info(f"数据库: {args.db_path}")
     logger.info(f"输出目录: {args.output_dir}")
-    
+
     writer = DuckDBWriter5Min(args.db_path)
-    
+
     try:
         count = writer.export_to_parquet(args.output_dir)
         logger.info(f"成功导出 {count} 个文件")
     finally:
         writer.close()
-    
+
     return count
 
 
 def main():
     args = parse_args()
-    
+
     # Ensure data directory exists
     Path(args.db_path).parent.mkdir(parents=True, exist_ok=True)
     Path(args.output_dir).parent.mkdir(parents=True, exist_ok=True)
-    
+
     if args.export_only:
         export_data(args)
     else:
         success, fail = download_data(args)
-        
+
         # Auto export after download
         if success > 0:
             logger.info("\n自动导出到Parquet...")
             export_data(args)
-        
+
         sys.exit(0 if fail == 0 else 1)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
