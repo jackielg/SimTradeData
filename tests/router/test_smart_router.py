@@ -54,7 +54,7 @@ class TestPublicAPISignatures:
     """Verify all public API methods exist and are callable."""
 
     METHODS = [
-        "get_daily_bars", "get_adjust_factor", "get_xdxr",
+        "get_daily_bars", "get_xdxr",
         "get_money_flow", "get_lhb", "get_margin",
         "get_stock_list", "get_trade_calendar", "get_index_data",
         "get_realtime_quotes", "get_minute_bars",

@@ -10,7 +10,6 @@ DEFAULT_TTL = {
     "stock_list": 86400,       # 24h
     "daily_kline": 604800,     # 7 days
     "snapshot": 5,             # 5s
-    "adjust_factor": 86400,    # 24h
     "fundamentals": 3600,      # 1h
     "trade_calendar": 604800,  # 7 days
 }

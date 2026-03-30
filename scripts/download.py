@@ -39,7 +39,7 @@ def print_data_status(db_path: str = DEFAULT_DB_PATH) -> None:
 
         # Per-symbol tables
         print("\n[Per-Symbol Tables]")
-        for table in ["stocks", "valuation", "fundamentals", "exrights", "adjust_factors"]:
+        for table in ["stocks", "valuation", "fundamentals", "exrights"]:
             info = status.get(table, {})
             rows = info.get("rows", 0)
             stocks = info.get("stocks", 0)

@@ -14,10 +14,6 @@ DEFAULT_ROUTE_TABLE = {
         "cn": ["mootdx", "eastmoney", "baostock"],
         "us": ["yfinance"],
     },
-    "adjust_factor": {
-        "cn": ["mootdx", "baostock"],
-        "us": ["yfinance"],
-    },
     "xdxr": {
         "cn": ["mootdx"],
     },

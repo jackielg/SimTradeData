@@ -65,16 +65,7 @@ def main():
             print(f"  [FAIL] get_daily_bars: {e}")
             failed += 1
 
-        # 3. adjust_factor
-        print("\n--- Adjust Factor ---")
-        try:
-            df = router.get_adjust_factor(test_symbol, start_date, end_date)
-            check("get_adjust_factor", df)
-        except Exception as e:
-            print(f"  [FAIL] get_adjust_factor: {e}")
-            failed += 1
-
-        # 4. xdxr
+        # 3. xdxr
         print("\n--- XDXR ---")
         try:
             df = router.get_xdxr(test_symbol)

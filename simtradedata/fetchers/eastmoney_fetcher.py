@@ -243,6 +243,45 @@ class EastMoneyFetcher(BaseFetcher):
         return pd.DataFrame(rows)
 
     @staticmethod
+    def parse_dividends(records: list) -> pd.DataFrame:
+        """Parse EastMoney share bonus detail records into dividend events.
+
+        Args:
+            records: List of dicts from RPT_SHAREBONUS_DET API response.
+
+        Returns:
+            DataFrame with columns: date, bonus_ps, allotted_ps.
+            bonus_ps = PRETAX_BONUS_RMB / 10 (yuan per share)
+            allotted_ps = (BONUS_RATIO + IT_RATIO) / 10 (shares per share)
+        """
+        if not records:
+            return pd.DataFrame()
+
+        rows = []
+        for rec in records:
+            ex_date = rec.get("EX_DIVIDEND_DATE")
+            if not ex_date:
+                continue
+            # Truncate timestamp portion: "2024-01-02 00:00:00" or
+            # "2024-01-02T00:00:00.000"
+            ex_date = ex_date[:10]
+
+            pretax = rec.get("PRETAX_BONUS_RMB") or 0.0
+            bonus_ratio = rec.get("BONUS_RATIO") or 0.0
+            it_ratio = rec.get("IT_RATIO") or 0.0
+
+            rows.append({
+                "date": ex_date,
+                "bonus_ps": pretax / 10.0,
+                "allotted_ps": (bonus_ratio + it_ratio) / 10.0,
+            })
+
+        if not rows:
+            return pd.DataFrame()
+
+        return pd.DataFrame(rows)
+
+    @staticmethod
     def parse_margin(records: list) -> pd.DataFrame:
         """Parse EastMoney margin trading records.
 
@@ -415,6 +454,48 @@ class EastMoneyFetcher(BaseFetcher):
             "Fetched %d LHB records for %s to %s",
             len(df), start_date, end_date,
         )
+        return df
+
+    @retry(config=_EASTMONEY_RETRY)
+    def fetch_dividends(self, symbol: str) -> pd.DataFrame:
+        """Fetch dividend/bonus share events from EastMoney RPT_SHAREBONUS_DET.
+
+        Returns all implemented (has EX_DIVIDEND_DATE) dividend events for a
+        stock, including cash dividends and bonus/transferred shares.
+
+        Args:
+            symbol: Stock code in PTrade format (e.g. '000001.SZ').
+
+        Returns:
+            DataFrame with columns: date, bonus_ps, allotted_ps.
+        """
+        code, _ = symbol.split(".")
+
+        url = "https://datacenter-web.eastmoney.com/api/data/v1/get"
+        params = {
+            "reportName": "RPT_SHAREBONUS_DET",
+            "columns": (
+                "SECURITY_CODE,EX_DIVIDEND_DATE,"
+                "PRETAX_BONUS_RMB,BONUS_RATIO,IT_RATIO"
+            ),
+            "filter": f"(SECURITY_CODE=\"{code}\")",
+            "pageNumber": "1",
+            "pageSize": "500",
+            "sortTypes": "1",
+            "sortColumns": "EX_DIVIDEND_DATE",
+            "source": "WEB",
+            "client": "WEB",
+        }
+
+        data = self._get(url, params)
+
+        records = (data.get("result") or {}).get("data")
+        if not records:
+            logger.debug("No dividend data for %s", symbol)
+            return pd.DataFrame()
+
+        df = self.parse_dividends(records)
+        logger.info("Fetched %d dividend events for %s", len(df), symbol)
         return df
 
     @retry(config=_EASTMONEY_RETRY)

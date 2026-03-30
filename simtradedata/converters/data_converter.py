@@ -253,48 +253,6 @@ class DataConverter:
 
         return final_result
 
-    def convert_adjust_factor(self, df: pd.DataFrame, symbol: str) -> pd.Series:
-        """
-        Convert adjust factor data to PTrade format
-
-        PTrade uses backward adjust factor as a Series named 'backward_a'
-
-        Args:
-            df: DataFrame with foreAdjustFactor and backAdjustFactor
-            symbol: Stock code
-
-        Returns:
-            Series with backward adjust factor
-        """
-        if df.empty:
-            return pd.Series(dtype=float)
-
-        # Strict validation
-        expected_fields = ["date", "foreAdjustFactor", "backAdjustFactor"]
-        missing_fields = [f for f in expected_fields if f not in df.columns]
-        if missing_fields:
-            raise ValueError(
-                f"Missing expected adjust factor fields: {missing_fields}. "
-                f"Got columns: {list(df.columns)}"
-            )
-
-        # Set date as index if it's a column
-        if not isinstance(df.index, pd.DatetimeIndex):
-            if "date" in df.columns:
-                df = df.set_index("date")
-            df.index = pd.to_datetime(df.index)
-
-        # Extract backward adjust factor
-        if "backAdjustFactor" in df.columns:
-            result = df["backAdjustFactor"].astype(np.float32)
-            result.name = "backward_a"
-        else:
-            result = pd.Series(dtype=np.float32, name="backward_a")
-
-        logger.info(f"Converted adjust factor for {symbol}: {len(result)} days")
-
-        return result
-
     def convert_exrights_data(
         self, dividend_df: pd.DataFrame, adjust_df: pd.DataFrame, symbol: str
     ) -> pd.DataFrame:

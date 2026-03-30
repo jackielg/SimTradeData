@@ -194,19 +194,6 @@ class SmartRouter:
 
         return self._try_fetch("daily_bars", fetch_from, symbol=symbol)
 
-    def get_adjust_factor(self, symbol, start_date, end_date):
-        """Fetch backward adjust factors with automatic source selection."""
-
-        def fetch_from(fetcher, source_name):
-            if source_name == "yfinance":
-                _, result = fetcher.fetch_batch_ohlcv(
-                    [symbol], start_date, end_date,
-                )
-                return result.get(symbol, pd.DataFrame())
-            return fetcher.fetch_adjust_factor(symbol, start_date, end_date)
-
-        return self._try_fetch("adjust_factor", fetch_from, symbol=symbol)
-
     def get_xdxr(self, symbol):
         """Fetch ex-dividend/ex-rights data."""
 

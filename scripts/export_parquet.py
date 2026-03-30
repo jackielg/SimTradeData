@@ -13,6 +13,7 @@ import argparse
 import logging
 from pathlib import Path
 
+from simtradedata.utils.paths import DUCKDB_PATH, US_DUCKDB_PATH
 from simtradedata.writers.duckdb_writer import DuckDBWriter
 
 logging.basicConfig(
@@ -22,23 +23,23 @@ logging.basicConfig(
 
 # market → DuckDB path
 DB_PATHS = {
-    "cn": "data/cn.duckdb",
-    "us": "data/us.duckdb",
+    "cn": str(DUCKDB_PATH),
+    "us": str(US_DUCKDB_PATH),
 }
 
 # Legacy DB names → canonical names (for auto-migration)
 _LEGACY_DB = {
-    "data/simtradedata.duckdb": "data/cn.duckdb",
-    "data/us_stocks.duckdb": "data/us.duckdb",
+    "data/simtradedata.duckdb": str(DUCKDB_PATH),
+    "data/us_stocks.duckdb": str(US_DUCKDB_PATH),
 }
 
 
 def _resolve_db(market: str) -> str:
-    """Resolve DB path, auto-migrating legacy names."""
+    """Resolve DB path, preferring the one with actual data."""
     canonical = DB_PATHS[market]
     if Path(canonical).exists():
         return canonical
-    # Check legacy names
+    # Check legacy names as fallback
     for legacy, target in _LEGACY_DB.items():
         if target == canonical and Path(legacy).exists():
             return legacy
@@ -79,11 +80,6 @@ def export_to_parquet(db_path: str, output_dir: str, market: str = "cn") -> None
         print(f"  fundamentals/: {count_files('fundamentals'):>5} files, {get_dir_size('fundamentals'):>8.1f} MB")
         print(f"  valuation/:    {count_files('valuation'):>5} files, {get_dir_size('valuation'):>8.1f} MB")
         print(f"  metadata/:     {count_files('metadata'):>5} files, {get_dir_size('metadata'):>8.1f} MB")
-
-        for name in ["ptrade_adj_pre.parquet", "ptrade_adj_post.parquet"]:
-            f = output_path / name
-            if f.exists():
-                print(f"  {name}: {f.stat().st_size / (1024*1024):.1f} MB")
 
         print(f"\nDone! → {output_dir}")
 

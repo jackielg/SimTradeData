@@ -1,6 +1,14 @@
-[English](README.md) | 中文
+[English](README.md) | 中文 | [Deutsch](README_de.md)
 
 # SimTradeData - 高效量化交易数据下载工具
+
+[![Python 3.10+](https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-red.svg)](LICENSE)
+[![Version](https://img.shields.io/badge/Version-1.2.0-brightgreen.svg)](CHANGELOG.md)
+[![DuckDB](https://img.shields.io/badge/Storage-DuckDB-FFF000?logo=duckdb&logoColor=black)](https://duckdb.org/)
+[![Parquet](https://img.shields.io/badge/Export-Parquet-50ABF1)](https://parquet.apache.org/)
+[![Code Style: Black](https://img.shields.io/badge/Code%20Style-Black-000000.svg)](https://github.com/psf/black)
+[![Poetry](https://img.shields.io/badge/Packaging-Poetry-60A5FA?logo=poetry&logoColor=white)](https://python-poetry.org/)
 
 > **BaoStock + Mootdx + EastMoney + yfinance 多数据源** | **A股 + 美股** | **PTrade格式兼容** | **DuckDB + Parquet存储**
 
@@ -33,8 +41,7 @@
 - **市场数据**: OHLCV 日线数据，含涨跌停价、前收盘价
 - **估值指标**: PE/PB/PS/PCF/换手率/总股本/流通股
 - **财务数据**: 23个季度财务指标 + TTM指标自动计算
-- **除权除息**: 分红、送股、配股数据
-- **复权因子**: 前复权/后复权因子
+- **除权除息**: 分红、送股、配股数据（含前复权因子）
 - **元数据**: 股票信息、交易日历、指数成分股、ST/停牌状态
 - **美股支持**: 6000+ 美股普通股，S&P 500 / NASDAQ-100 指数成分股
 
@@ -47,8 +54,8 @@
 
 ```
 data/
-├── simtradedata.duckdb          # DuckDB 数据库 - A股（下载源）
-├── us_stocks.duckdb             # DuckDB 数据库 - 美股（下载源）
+├── cn.duckdb          # DuckDB 数据库 - A股（下载源）
+├── us.duckdb             # DuckDB 数据库 - 美股（下载源）
 └── export/                      # 导出的 Parquet 文件（按市场分目录）
     ├── cn/                      # A股导出
     │   ├── stocks/              # 日线行情（每只股票一个文件）
@@ -58,8 +65,6 @@ data/
     │   ├── fundamentals/        # 季度财务数据（含TTM）
     │   ├── valuation/           # 估值指标（日频）
     │   ├── metadata/            # 元数据
-    │   ├── ptrade_adj_pre.parquet
-    │   ├── ptrade_adj_post.parquet
     │   └── manifest.json
     └── us/                      # 美股导出
         ├── stocks/
@@ -69,10 +74,14 @@ data/
         ├── fundamentals/
         ├── valuation/
         ├── metadata/
-        ├── ptrade_adj_pre.parquet
-        ├── ptrade_adj_post.parquet
         └── manifest.json
 ```
+
+## 前置条件
+
+- **Python**: 3.10 或更高版本
+- **Poetry**: [安装指南](https://python-poetry.org/docs/#installation)
+- **网络**: 下载数据需要网络（A 股数据建议使用中国大陆网络）
 
 ## 快速开始
 
@@ -117,11 +126,11 @@ poetry shell
 
 ```bash
 # 完整下载（推荐）
-# Mootdx: 行情、复权因子、除权除息、批量财务、交易日历、基准指数
+# Mootdx: 行情、除权除息、批量财务、交易日历、基准指数
 # BaoStock: 估值指标、ST/停牌状态、指数成分股
 poetry run python scripts/download.py
 
-# 首次下载加速：先导入 TDX 日线包，再补充复权因子等
+# 首次下载加速：先导入 TDX 日线包，再补充除权除息等
 # （6000+ 只股票的 OHLCV 从数小时缩短到几分钟）
 poetry run python scripts/download.py --tdx-download --source mootdx --skip-fundamentals
 
@@ -147,7 +156,6 @@ poetry run python scripts/download.py --source baostock
 |---------|-----------|------|
 | 行情 OHLCV（首次） | TDX 日线包 | 最快，~500MB 一次性导入全部历史 |
 | 行情 OHLCV（增量） | Mootdx | 速度快，本地网络 |
-| 复权因子 | Mootdx | 随行情一起下载 |
 | 除权除息 (XDXR) | Mootdx | 数据更完整 |
 | 批量财务数据 | Mootdx | 一个ZIP=所有股票，远优于逐股查询 |
 | 估值 PE/PB/PS/换手率 | BaoStock | 独有数据 |
@@ -197,7 +205,7 @@ poetry run python scripts/download_us.py --skip-fundamentals --skip-metadata
 poetry run python scripts/download_us.py --start-date 2020-01-01
 ```
 
-美股代码格式：`AAPL.US`（与 A 股 `600000.SS` 保持 `{code}.{market}` 一致），数据存入独立数据库 `data/us_stocks.duckdb`。
+美股代码格式：`AAPL.US`（与 A 股 `600000.SS` 保持 `{code}.{market}` 一致），数据存入独立数据库 `data/us.duckdb`。
 
 **TDX 官方数据包（最快获取完整历史行情）**
 
@@ -430,63 +438,9 @@ poetry run python scripts/test_smart_router_live.py
 
 ## 版本历史
 
-### v1.2.0 (2026-03-13) - 智能数据源路由
-- 新增 SmartRouter 统一数据访问层
-- 自动根据数据类型和市场选择最佳数据源
-- 静态优先级 + 熔断器健康感知，主源失败自动 fallback
-- 支持 13 种数据类型：日线、复权因子、XDXR、财务、估值、资金流向、龙虎榜、融资融券等
-- 新增 EastMoney 数据源作为 A 股日线 fallback
-- 输出列标准化：无论使用哪个数据源，返回一致的列结构
+完整版本历史请查看 [CHANGELOG.md](CHANGELOG.md)。
 
-### v1.1.0 (2026-03-10) - TDX 快速导入集成
-- 新增 `--tdx-download` 参数：自动下载 TDX 官方沪深日线包并导入
-- 新增 `--tdx-source` 参数：从本地 ZIP 文件或目录导入 TDX 日线数据
-- 首次下载 6000+ 只股票 OHLCV 从数小时缩短到几分钟
-- TDX 导入作为 Phase 0 在 Mootdx 阶段之前自动执行
-- 修复 TDX 导入后复权因子和除权除息无法补充下载的问题
-- 复权因子和除权除息改为按个股检查是否缺失，独立于 OHLCV 增量逻辑
-
-### v0.6.0 (2026-02-08) - 美股数据支持
-- 新增 yfinance 数据源，支持 6000+ 只美股普通股
-- 美股代码格式 `AAPL.US`，与 A 股 `{code}.{market}` 一致
-- 独立数据库 `data/us_stocks.duckdb`，与 A 股数据隔离
-- 5 阶段下载：股票列表 → 批量 OHLCV → 财务+估值 → 元数据+除权 → 全局数据
-- `yf.download()` 批量获取行情（每批 50 只），效率高
-- 支持 S&P 500 / NASDAQ-100 指数成分股（Wikipedia 爬取）
-- 增量更新：复用 `get_max_date()` 逻辑，仅下载新数据
-
-### v0.5.0 (2026-02-01) - 统一下载命令
-- 新增 `scripts/download.py` 统一下载入口
-- 自动编排 Mootdx 和 BaoStock 数据源，各取所长
-- 优化增量检测：无新交易日时秒级跳过全部股票
-- 财务数据增量：基于远程文件 hash 检测变更
-- 指数成分股增量：记录已下载月份避免重复
-- 修复 Mootdx Affair API 返回值处理
-- 修复 DuckDB `changes()` 函数兼容性
-- 自动过滤停牌股票的空行数据
-
-### v0.4.0 (2026-01-30) - DuckDB + Parquet 架构
-- 存储格式从 HDF5 迁移到 DuckDB + Parquet
-- 添加涨跌停价计算（导出时基于 preclose）
-- 添加 TTM 指标计算（导出时用 SQL window function）
-- 添加除权除息数据下载
-- 添加股本数据（total_shares/a_floats）
-- 优化增量更新逻辑
-- 清理废弃代码和文档
-
-### v0.3.0 (2025-11-24) - 质量与架构优化版
-- 实现市值字段计算
-- 修复 TTM 指标计算
-- 添加数据验证器
-- 提取 BaseFetcher 基类
-
-### v0.2.0 (2025-11-22) - 性能优化版
-- 实现统一数据获取，API 调用减少 33%
-- 优化 HDF5 写入逻辑
-
-### v0.1.0 (2024-11-14) - 初始版本
-- 基础数据下载功能
-- BaoStock 数据源集成
+**最新版本**: v1.2.0 (2026-03-13) - 智能数据源路由
 
 ## 相关链接
 

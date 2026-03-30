@@ -425,8 +425,10 @@ class BaoStockFetcher(BaseFetcher):
         result = pd.DataFrame()
         result["date"] = pd.to_datetime(df["dividOperateDate"])
 
-        # BaoStock does not provide allotted shares info, set to 0
-        result["allotted_ps"] = 0.0
+        # allotted_ps: bonus shares (dividStocksPs = songgu)
+        result["allotted_ps"] = pd.to_numeric(
+            df["dividStocksPs"], errors="coerce"
+        ).fillna(0.0)
 
         # rationed_ps: shares from capital reserve conversion (dividReserveToStockPs)
         result["rationed_ps"] = pd.to_numeric(
@@ -436,15 +438,13 @@ class BaoStockFetcher(BaseFetcher):
         # rationed_px: BaoStock does not provide rationed price, set to 0
         result["rationed_px"] = 0.0
 
-        # bonus_ps: bonus shares (dividStocksPs)
+        # bonus_ps: cash dividend per share (used in adj factor formula)
         result["bonus_ps"] = pd.to_numeric(
-            df["dividStocksPs"], errors="coerce"
+            df["dividCashPsBeforeTax"], errors="coerce"
         ).fillna(0.0)
 
-        # dividend: cash dividend before tax (dividCashPsBeforeTax)
-        result["dividend"] = pd.to_numeric(
-            df["dividCashPsBeforeTax"], errors="coerce"
-        )
+        # dividend: same as bonus_ps, kept for record
+        result["dividend"] = result["bonus_ps"]
 
         logger.info(f"Fetched {len(result)} dividend records for {symbol} year {year}")
         return result
