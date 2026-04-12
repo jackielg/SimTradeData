@@ -85,16 +85,17 @@ class BaoStock5MinFetcher(BaoStockFetcher):
 
     @retry_on_failure()
     def fetch_5min_bars(
-        self, symbol: str, start_date: str, end_date: str, adjustflag: str = "3"
+        self, symbol: str, start_date: str, end_date: str, adjustflag: str = "3", frequency: str = "5"
     ) -> pd.DataFrame:
         """
-        Fetch 5-minute K-line data for a stock
+        Fetch minute K-line data for a single stock
 
         Args:
             symbol: Stock code in PTrade format (e.g., '000001.SZ')
             start_date: Start date (YYYY-MM-DD)
             end_date: End date (YYYY-MM-DD)
-            adjustflag: Adjustment flag (1=backward, 2=forward, 3=unadjusted)
+            adjustflag: Adjustment flag (1,backward, 2,forward, 3,unadjusted)
+            frequency: K-line frequency ('5', '15', '30', '60')
 
         Returns:
             DataFrame with columns:
@@ -121,7 +122,7 @@ class BaoStock5MinFetcher(BaoStockFetcher):
                 fields=MINUTE_FIELDS,
                 start_date=start_date,
                 end_date=end_date,
-                frequency="5",
+                frequency=frequency,
                 adjustflag=adjustflag,
             )
 
@@ -183,16 +184,17 @@ class BaoStock5MinFetcher(BaoStockFetcher):
             raise
 
     def fetch_multiple_stocks(
-        self, symbols: List[str], start_date: str, end_date: str, adjustflag: str = "3"
+        self, symbols: List[str], start_date: str, end_date: str, adjustflag: str = "3", frequency: str = "5"
     ) -> dict:
         """
-        Fetch 5-minute data for multiple stocks
+        Fetch minute K-line data for multiple stocks
 
         Args:
             symbols: List of stock codes in PTrade format
             start_date: Start date (YYYY-MM-DD)
             end_date: End date (YYYY-MM-DD)
             adjustflag: Adjustment flag
+            frequency: K-line frequency ('5', '15', '30', '60')
 
         Returns:
             Dict mapping symbol to DataFrame
@@ -202,7 +204,7 @@ class BaoStock5MinFetcher(BaoStockFetcher):
         for i, symbol in enumerate(symbols):
             logger.info(f"[{i+1}/{len(symbols)}] Downloading {symbol}...")
             try:
-                df = self.fetch_5min_bars(symbol, start_date, end_date, adjustflag)
+                df = self.fetch_5min_bars(symbol, start_date, end_date, adjustflag, frequency)
                 if not df.empty:
                     results[symbol] = df
             except Exception as e:
