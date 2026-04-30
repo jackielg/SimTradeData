@@ -35,6 +35,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
+import time as time_module
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -69,9 +70,16 @@ A_SHARE_PREFIXES = {
 }
 
 # 指数代码 (从股票列表排除)
+# 上海: 000xxx.SS 全部为上证/中证系列指数，无5分钟数据
+#     真实上海股票: 600xxx/601xxx/603xxx/605xxx/688xxx/689xxx.SS
+#     000xxx.SS 全为指数，无5分钟数据
+# 深圳: 399xxx.SZ 为深证系列指数
+#     000xxx.SZ / 001xxx.SZ / 002xxx.SZ / 003xxx.SZ 为真实股票
 INDEX_CODES = {
-    "000300.SS", "000016.SS", "000905.SS", "000001.SS",
-    "399001.SZ", "399006.SZ", "000688.SS",
+    *{"%06d.SS" % i for i in range(1, 1000)},  # 000001.SS ~ 000999.SS 上证/中证系列指数（全部无5分钟数据）
+    "000300.SS", "000016.SS", "000905.SS",  # 沪深300, 上证50, 中证500
+    "399001.SZ", "399006.SZ", "399005.SZ", "399300.SZ",  # 深证综指, 创业板, 深证成指, 沪深300
+    "000688.SS",  # 科创50
 }
 
 # 指数成分股采样代码
@@ -249,6 +257,91 @@ class RateLimiter:
 #  主下载器
 # ══════════════════════════════════════════════════════════════════════
 
+class HourlyProgressReporter:
+    """每小时输出下载进度的报告器"""
+
+    def __init__(self, interval_seconds: float = 3600.0):
+        self.interval = interval_seconds
+        self.start_time = time_module.time()
+        self.last_report_time = self.start_time
+        self.phase_name = ""
+        self.total = 0
+        self.ok = 0
+        self.no_data = 0
+        self.fail = 0
+
+    def start_phase(self, phase_name: str, total: int):
+        self.phase_name = phase_name
+        self.total = total
+        self.start_time = time_module.time()
+        self.last_report_time = self.start_time
+        self.ok = 0
+        self.no_data = 0
+        self.fail = 0
+        elapsed = 0
+        logger.info(f"[{self.phase_name}] 开始下载，共 {self.total} 只股票")
+        self._report_header()
+
+    def record_result(self, ok: int = 0, no_data: int = 0, fail: int = 0):
+        self.ok = ok
+        self.no_data = no_data
+        self.fail = fail
+
+    def check_and_report(self, current_idx: int) -> bool:
+        """检查是否需要报告，返回 True 表示已报告"""
+        now = time_module.time()
+        if now - self.last_report_time >= self.interval:
+            self._do_report(current_idx)
+            self.last_report_time = now
+            return True
+        return False
+
+    def _elapsed_str(self) -> str:
+        elapsed = time_module.time() - self.start_time
+        hours = int(elapsed // 3600)
+        minutes = int((elapsed % 3600) // 60)
+        seconds = int(elapsed % 60)
+        if hours > 0:
+            return f"{hours}h {minutes}m {seconds}s"
+        elif minutes > 0:
+            return f"{minutes}m {seconds}s"
+        else:
+            return f"{seconds}s"
+
+    def _report_header(self):
+        logger.info("─" * 60)
+        logger.info(f"[{self.phase_name}] 进度报告")
+        logger.info("─" * 60)
+
+    def _do_report(self, current_idx: int):
+        limiter = get_baostock_rate_limiter()
+        quota_status = limiter.get_status()
+        elapsed = self._elapsed_str()
+        rate = (current_idx + 1) / (time_module.time() - self.start_time) if self.start_time else 0
+        remaining = (self.total - current_idx - 1) / rate if rate > 0 else 0
+        remaining_str = ""
+        if remaining > 0:
+            if remaining >= 3600:
+                remaining_str = f", 预计剩余 {int(remaining // 3600)}h {int((remaining % 3600) // 60)}m"
+            elif remaining >= 60:
+                remaining_str = f", 预计剩余 {int(remaining // 60)}m"
+            else:
+                remaining_str = f", 预计剩余 {int(remaining)}s"
+
+        logger.info("─" * 60)
+        logger.info(
+            f"[{self.phase_name}] 进度: {current_idx + 1}/{self.total} "
+            f"({(current_idx + 1) / self.total * 100:.1f}%) "
+            f"| ok={self.ok} no_data={self.no_data} fail={self.fail} "
+            f"| 已运行 {elapsed}{remaining_str}"
+        )
+        logger.info(
+            f"  BaoStock 配额: {quota_status['count']}/{quota_status['limit']} "
+            f"({quota_status['percentage']:.1f}%)"
+        )
+        logger.info("─" * 60)
+
+
 class BaoStockFullDownloader:
     def __init__(self, output_dir: Path, start: str, end: str,
                  rate_limiter: RateLimiter, progress: ProgressTracker,
@@ -316,10 +409,13 @@ class BaoStockFullDownloader:
         # 2. 从输出目录已有数据读取
         out_stocks_dir = self.output / "stocks"
         if out_stocks_dir.exists():
-            codes = sorted(f.stem for f in out_stocks_dir.glob("*.parquet"))
+            codes = sorted(
+                s for s in (f.stem for f in out_stocks_dir.glob("*.parquet"))
+                if is_a_share(s)
+            )
             if codes:
                 self.stock_pool = codes
-                logger.info(f"从输出目录读取股票池: {len(codes)} 只")
+                logger.info(f"从输出目录读取股票池: {len(codes)} 只 A 股")
                 return self.stock_pool
 
         # 3. Fallback: BaoStock API (可能较慢或超时)
@@ -334,13 +430,10 @@ class BaoStockFullDownloader:
         while current <= end_ts:
             date_str = current.strftime("%Y-%m-%d")
             try:
-                import signal
-                def _handler(signum, frame):
-                    raise TimeoutError()
-                signal.signal(signal.SIGALRM, _handler)
-                signal.alarm(timeout_per_query)
+                import socket
+                socket.setdefaulttimeout(timeout_per_query)
                 rs = bs.query_all_stock(day=date_str)
-                signal.alarm(0)
+                socket.setdefaulttimeout(None)
                 if rs and rs.error_code == "0":
                     while rs.next():
                         code = rs.get_row_data()[0]
@@ -349,10 +442,6 @@ class BaoStockFullDownloader:
                 self.rl.wait()
             except Exception as e:
                 logger.warning(f"采样 {date_str} 失败: {e}")
-                try:
-                    signal.alarm(0)
-                except Exception:
-                    pass
 
             if current.month == 12:
                 current = current.replace(year=current.year + 1, month=1, day=1)
@@ -477,6 +566,9 @@ class BaoStockFullDownloader:
         logger.info(f"[Phase 1] 日线+估值: {len(pending)} 只待下载 (已完成 {len(done)})")
         logger.info("=" * 60)
 
+        reporter = HourlyProgressReporter(interval_seconds=3600.0)
+        reporter.start_phase("Phase 1 日线+估值", len(pending))
+
         ok = no_data = fail = 0
         for i, sym in enumerate(tqdm(pending, desc="日线", ncols=100)):
             for attempt in range(MAX_RETRIES):
@@ -544,6 +636,10 @@ class BaoStockFullDownloader:
 
             self.progress.mark_stock_done(phase, sym)
             self.rl.wait()
+
+            # 每小时进度报告
+            reporter.record_result(ok=ok, no_data=no_data, fail=fail)
+            reporter.check_and_report(i)
 
             if (i + 1) % BATCH_SIZE == 0:
                 logger.info(f"  [batch] {i+1}/{len(pending)} ok={ok} no_data={no_data} fail={fail}")
@@ -619,6 +715,9 @@ class BaoStockFullDownloader:
         logger.info(f"[Phase 2] 除权除息+前复权因子: {len(pending)} 只待下载 (已完成 {len(done)})")
         logger.info("=" * 60)
 
+        reporter = HourlyProgressReporter(interval_seconds=3600.0)
+        reporter.start_phase("Phase 2 除权因子", len(pending))
+
         ok = no_data = fail = 0
         for i, sym in enumerate(tqdm(pending, desc="除权因子", ncols=100)):
             for attempt in range(MAX_RETRIES):
@@ -653,6 +752,10 @@ class BaoStockFullDownloader:
 
             self.progress.mark_stock_done(phase, sym)
             self.rl.wait()
+
+            # 每小时进度报告
+            reporter.record_result(ok=ok, no_data=no_data, fail=fail)
+            reporter.check_and_report(i)
 
             if (i + 1) % BATCH_SIZE == 0:
                 logger.info(f"  [batch] {i+1}/{len(pending)} ok={ok} no_data={no_data} fail={fail}")
@@ -769,6 +872,9 @@ class BaoStockFullDownloader:
         logger.info(f"[Phase 4] 5分钟线{range_label}: {len(pending)} 只待下载")
         logger.info("=" * 60)
 
+        reporter = HourlyProgressReporter(interval_seconds=3600.0)
+        reporter.start_phase("Phase 4 5分钟线", len(pending))
+
         ok = no_data = fail = 0
         for i, sym in enumerate(tqdm(pending, desc="5min", ncols=100)):
             for attempt in range(MAX_RETRIES):
@@ -797,6 +903,10 @@ class BaoStockFullDownloader:
 
             self.progress.mark_stock_done(phase, sym)
             self.rl.wait(is_minute=True)
+
+            # 每小时进度报告
+            reporter.record_result(ok=ok, no_data=no_data, fail=fail)
+            reporter.check_and_report(i)
 
             if (i + 1) % BATCH_SIZE == 0:
                 logger.info(f"  [batch] {i+1}/{len(pending)} ok={ok} no_data={no_data} fail={fail}")
@@ -827,15 +937,8 @@ class BaoStockFullDownloader:
             if phases in ("all", "metadata"):
                 self.discover_stock_pool()
             elif not self.stock_pool:
-                # 其他阶段需要股票池
-                # 尝试从已有日线目录读取
-                stocks_dir = self.output / "stocks"
-                if stocks_dir.exists():
-                    self.stock_pool = sorted(
-                        f.stem for f in stocks_dir.glob("*.parquet")
-                    )
-                    logger.info(f"从已有日线读取股票池: {len(self.stock_pool)} 只")
-                else:
+                # 其他阶段需要股票池，发现失败则报错
+                if not self.discover_stock_pool():
                     logger.error("无股票池，请先运行 --phase metadata 或 --phase all")
                     return
 

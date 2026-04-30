@@ -15,7 +15,9 @@ rm -rf "C:/Users/Admin/SynologyDrive/PtradeProjects/SimTradeData/data/cn"
 mkdir -p "C:/Users/Admin/SynologyDrive/PtradeProjects/SimTradeData/data/cn"
 ```
 
-> **重要**：清理后所有 phases 必须重新下载，但断点续传机制可以避免重复下载已完成的部分。
+> **重要**：
+> - 清理后所有 phases 必须重新下载，但断点续传机制可以避免重复下载已完成的部分
+> - 每次全新下载前，都应清理 `data/cn` 目录，避免旧文件与新数据混杂（如旧的 `000002.SS` 与新的 `000002.SZ` 冲突）
 
 ### 1.2 确认 baostock 版本
 
@@ -51,6 +53,40 @@ else:
 poetry run python -c "import baostock; print('baostock OK')"
 poetry run python -c "import simtradedata; print('simtradedata OK')"
 ```
+
+---
+
+### 1.5 无人值守运行前检查清单
+
+**下载前必须确认以下事项，否则可能导致中途停止：**
+
+```bash
+# 1. 关闭 Windows 休眠/睡眠（防止系统自动休眠导致进程被中断）
+powercfg /change standby-timeout-ac 0    # 关闭交流电源时的睡眠
+powercfg /change hibernate-timeout-ac 0  # 关闭休眠
+
+# 2. 确认 Clash/VPN 稳定运行（网络断开会导致超时，脚本会自动重试）
+# 如果使用 Clash，确保 exit node = None，且代理稳定
+
+# 3. 确认磁盘空间充足（预计需要 ~5-10 GB）
+# data/cn 目录下所有 parquet 文件的总大小
+
+# 4. 确认 data/cn 目录已清理（全新下载必须）
+rm -rf "C:/Users/Admin/SynologyDrive/PtradeProjects/SimTradeData/data/cn"
+mkdir -p "C:/Users/Admin/SynologyDrive/PtradeProjects/SimTradeData/data/cn"
+```
+
+**预期耗时：**
+
+| 场景 | 预计时长 | 说明 |
+|------|---------|------|
+| Phase 0 元数据 | ~2 分钟 | 必定一天内完成 |
+| Phase 1 日线+估值 | ~1~2 小时 | 配额约 5,500 次，~3 stocks/秒 |
+| Phase 2 除权因子 | ~1~2 天 | 配额约 20,000~55,000 次，可能跨越多天 |
+| Phase 3 季度基本面 | ~1~2 天 | 配额约 27,500 次，可能跨越多天 |
+| Phase 4 5分钟线 | ~1~2 天 | 配额约 32,500 次，可能跨越多天 |
+
+> **Phase 2~4 配额估算均为参考值**，实际请求量取决于股票是否有数据（无数据则跳过）。脚本在配额达到 95% 时自动停止，次日继续。
 
 ---
 
@@ -132,28 +168,19 @@ poetry run python scripts/download_baostock_full.py --phase 5min --stock-range "
 
 ## 5. 内置稳定性保护
 
+### 内置稳定性保护
+
 脚本已内置以下保护机制，**无需手动干预**：
 
 | 保护机制 | 说明 |
 |----------|------|
+| **每小时进度报告** | 每小时自动输出当前进度、成功率、配额使用情况 |
 | **日配额追踪** | 持久化到 `data/cn/.baostock_daily_counter.json`，80% 警告，95% 自动停止 |
 | **黑名单检测** | 每次 API 返回检查错误码 `10001011`，立即终止 |
 | **自动重试** | 每只股票最多 3 次重试（指数退避最长 30 秒）|
 | **连续失败保护** | 连续 10 次失败则暂停 60 秒 |
 | **进程锁** | 防止多进程同时运行 |
 | **断点续传** | 每个 phase 独立续传，不重复下载已完成股票 |
-
-### 配额估算
-
-| Phase | 阶段 | 请求量 | 耗时 |
-|--------|------|--------|------|
-| Phase 0 | 元数据 | ~700 | ~2 分钟 |
-| Phase 1 | 日线+估值 | ~5,500 | ~1~2 小时 |
-| Phase 2 | 除权因子 | ~20,000~55,000 | ~1~2 小时 |
-| Phase 3 | 季度基本面 | ~60,000 | ~2~3 小时 |
-| Phase 4 | 5分钟线 | ~32,500 | ~1~2 小时 |
-
-> **日配额 50,000 次**：Phase 1 约用 11%，Phase 2+3 可能需要多天。脚本在 95% 时自动停止，次日继续。
 
 ---
 
@@ -167,6 +194,7 @@ poetry run python scripts/download_baostock_full.py --phase 5min --stock-range "
 | IP 黑名单 | `10001011` | 联系 QQ 群管理员解封，提供公网 IP |
 | 登录上限 | `10001005` | 等 1~2 分钟后重试 |
 | 进程锁冲突 | `Another download process is running` | 删除 `data/cn/.download.lock` 后重试 |
+| 下载中断（如 Ctrl+C、系统休眠）| 脚本中断 | 正常运行相同命令即可继续（断点续传）；若数据混乱，清理 `data/cn` 目录后重新开始 |
 
 ---
 
