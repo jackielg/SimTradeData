@@ -534,7 +534,7 @@ class BaoStockFullDownloader:
         # 股票元信息
         logger.info("  股票基本信息...")
         meta_rows = []
-        for sym in self.stock_pool[:500]:
+        for sym in self.stock_pool:
             try:
                 basic = self.standard.fetch_stock_basic(sym)
                 if not basic.empty:
