@@ -3,6 +3,7 @@ BaoStock data fetcher implementation
 """
 
 import logging
+import socket
 from datetime import datetime
 
 import baostock as bs
@@ -35,12 +36,16 @@ class BaoStockFetcher(BaseFetcher):
     _bs_logged_in = False
     _bs_login_count = 0
 
+    _SOCKET_TIMEOUT = 30  # BaoStock TCP 连接超时（秒）
+
     def _do_login(self):
         """BaoStock-specific login implementation"""
         # BaoStock uses a global session, only login once
         if not BaoStockFetcher._bs_logged_in:
+            socket.setdefaulttimeout(BaoStockFetcher._SOCKET_TIMEOUT)
             lg = bs.login()
             if lg.error_code != "0":
+                socket.setdefaulttimeout(None)
                 raise ConnectionError(f"BaoStock login failed: {lg.error_msg}")
             BaoStockFetcher._bs_logged_in = True
             logger.info("BaoStock login successful")
@@ -50,11 +55,29 @@ class BaoStockFetcher(BaseFetcher):
     def _ensure_login(cls):
         """Ensure BaoStock session is valid, re-login if needed"""
         if not cls._bs_logged_in:
+            socket.setdefaulttimeout(cls._SOCKET_TIMEOUT)
             lg = bs.login()
             if lg.error_code != "0":
+                socket.setdefaulttimeout(None)
                 raise ConnectionError(f"BaoStock re-login failed: {lg.error_msg}")
             cls._bs_logged_in = True
             logger.info("BaoStock re-login successful")
+
+    @classmethod
+    def _force_relogin(cls):
+        """强制重新登录 BaoStock（会话超时后调用）"""
+        try:
+            bs.logout()
+        except Exception:
+            pass
+        cls._bs_logged_in = False
+        socket.setdefaulttimeout(cls._SOCKET_TIMEOUT)
+        lg = bs.login()
+        if lg.error_code != "0":
+            socket.setdefaulttimeout(None)
+            raise ConnectionError(f"BaoStock re-login failed: {lg.error_msg}")
+        cls._bs_logged_in = True
+        logger.info("BaoStock 强制重新登录成功")
 
     def _do_logout(self):
         """BaoStock-specific logout implementation"""
@@ -84,14 +107,29 @@ class BaoStockFetcher(BaseFetcher):
 
         bs_code = convert_from_ptrade_code(symbol, "baostock")
 
-        rs = bs.query_adjust_factor(
-            code=bs_code, start_date=start_date, end_date=end_date
-        )
+        socket.setdefaulttimeout(15)
+        try:
+            rs = bs.query_adjust_factor(
+                code=bs_code, start_date=start_date, end_date=end_date
+            )
+        except (socket.timeout, TimeoutError) as e:
+            socket.setdefaulttimeout(None)
+            raise TimeoutError(f"BaoStock adjust_factor timeout for {symbol}") from e
+        finally:
+            socket.setdefaulttimeout(None)
 
         if rs.error_code != "0":
-            raise RuntimeError(
-                f"Failed to query adjust factor for {symbol}: {rs.error_msg}"
-            )
+            error_msg = rs.error_msg or ""
+            if "用户未登录" in error_msg or "not login" in error_msg.lower():
+                logger.warning(f"BaoStock 会话超时，强制重新登录 (adjust_factor {symbol})")
+                BaoStockFetcher._force_relogin()
+                rs = bs.query_adjust_factor(
+                    code=bs_code, start_date=start_date, end_date=end_date
+                )
+            if rs.error_code != "0":
+                raise RuntimeError(
+                    f"Failed to query adjust factor for {symbol}: {rs.error_msg}"
+                )
 
         df = rs.get_data()
 
@@ -398,14 +436,37 @@ class BaoStockFetcher(BaseFetcher):
         """
         bs_code = convert_from_ptrade_code(symbol, "baostock")
 
-        rs = bs.query_dividend_data(
-            code=bs_code, year=str(year), yearType=year_type
-        )
+        socket.setdefaulttimeout(15)
+        try:
+            rs = bs.query_dividend_data(
+                code=bs_code, year=str(year), yearType=year_type
+            )
+        except (socket.timeout, TimeoutError) as e:
+            socket.setdefaulttimeout(None)
+            raise TimeoutError(f"BaoStock dividend query timeout for {symbol} year {year}") from e
+        finally:
+            socket.setdefaulttimeout(None)
 
         if rs.error_code != "0":
-            raise RuntimeError(
-                f"Failed to query dividend data for {symbol} year {year}: {rs.error_msg}"
-            )
+            error_msg = rs.error_msg or ""
+            # 检测会话超时，强制重新登录后重试
+            if "用户未登录" in error_msg or "not login" in error_msg.lower():
+                logger.warning(f"BaoStock 会话超时，强制重新登录 ({symbol} year {year})")
+                BaoStockFetcher._force_relogin()
+                socket.setdefaulttimeout(15)
+                try:
+                    rs = bs.query_dividend_data(
+                        code=bs_code, year=str(year), yearType=year_type
+                    )
+                except (socket.timeout, TimeoutError):
+                    socket.setdefaulttimeout(None)
+                    raise
+                finally:
+                    socket.setdefaulttimeout(None)
+            if rs.error_code != "0":
+                raise RuntimeError(
+                    f"Failed to query dividend data for {symbol} year {year}: {rs.error_msg}"
+                )
 
         # Use get_data() instead of iterating with next()
         df = rs.get_data()

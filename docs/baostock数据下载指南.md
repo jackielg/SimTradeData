@@ -90,9 +90,9 @@ mkdir -p "C:/Users/Admin/SynologyDrive/PtradeProjects/SimTradeData/data/cn"
 
 ---
 
-## 2. 策略数据需求（来自 trends_up_new）
+## 2. 策略数据需求（来自 trends_up）
 
-`trends_up_new` 策略对数据的要求：
+`trends_up` 策略对数据的要求：
 
 | 数据类型 | 用途 | 下载参数 | 存储方式 |
 |----------|------|----------|----------|
@@ -195,6 +195,48 @@ poetry run python scripts/download_baostock_full.py --phase 5min --stock-range "
 | 登录上限 | `10001005` | 等 1~2 分钟后重试 |
 | 进程锁冲突 | `Another download process is running` | 删除 `data/cn/.download.lock` 后重试 |
 | 下载中断（如 Ctrl+C、系统休眠）| 脚本中断 | 正常运行相同命令即可继续（断点续传）；若数据混乱，清理 `data/cn` 目录后重新开始 |
+| 下载卡住不动（TCP hang）| 日志停止输出，进程不退出 | 见下方「TCP hang 问题」章节 |
+
+### 6.1 TCP hang 问题（重要）
+
+**现象**：大批量下载时脚本突然停止输出日志，进程不退出也不报错。
+
+**根因**：BaoStock 底层使用 TCP 长连接（非 HTTP），`send_msg()` 中的 `recv()` 调用无超时保护。当 TCP 连接因网络波动、服务端超时等原因断开时，`recv()` 会永久阻塞。
+
+**已内置的修复**（`baostock_fetcher.py` v1.2.0+）：
+- `_do_login()` / `_force_relogin()` 中在 `bs.login()` 前设置 `socket.setdefaulttimeout(30)`
+- `fetch_dividend_data()` / `fetch_adjust_factor()` 中对每个 API 调用设置 15 秒 socket 超时
+- 检测 "用户未登录" 错误自动 `_force_relogin()`
+
+**如果仍然 hang 的处理步骤**：
+
+```bash
+# 1. 杀掉卡住的进程（找到 PID）
+ps aux | grep download_baostock
+kill <PID>
+
+# 2. 清理 BaoStock 残留连接
+python3 -c "import baostock as bs; bs.login(); bs.logout()"
+
+# 3. 修复 progress 文件（只保留实际有文件的股票）
+python3 -c "
+import json
+from pathlib import Path
+with open('data/cn/download_progress.json', 'r') as f:
+    data = json.load(f)
+existing = sorted(f.stem for f in Path('data/cn/exrights').glob('*.parquet'))
+data['phases']['phase2_exrights'] = {'status': 'in_progress', 'done_stocks': existing}
+with open('data/cn/download_progress.json', 'w') as f:
+    json.dump(data, f, ensure_ascii=False, indent=2)
+print(f'Done: {len(existing)}')
+"
+
+# 4. 使用 nohup 重新启动（不要使用 Claude Code run_in_background）
+nohup python3 scripts/download_baostock_full.py --phase exrights --no-lock > /tmp/exrights_download.log 2>&1 &
+
+# 5. 监控进度
+tail -f /tmp/exrights_download.log
+```
 
 ---
 
@@ -222,7 +264,7 @@ done
 | `valuation/` | ~5,500 | 每只 A 股一个 parquet |
 | `metadata/` | 4 | trade_days, benchmark, index_constituents, stock_metadata |
 
-### 7.2 检查数据字段（针对 trends_up_new）
+### 7.2 检查数据字段（针对 trends_up）
 
 ```bash
 poetry run python -c "

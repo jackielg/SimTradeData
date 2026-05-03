@@ -31,6 +31,16 @@ Python >=3.10, Poetry, Black+isort, DuckDB, flat layout (PEP 621 + poetry-core)
 - field_mappings.py 是数据源→PTrade 列名的唯一映射来源，新增字段必须在此注册
 - DuckDBWriter 负责 schema 管理、增量更新和派生计算（价格限制、TTM、除权因子）
 - 数据路径: data/cn/ 为导出给 SimTradeLab 的标准 Parquet 目录
+- BaoStock fetcher 必须在 login 前设置 `socket.setdefaulttimeout(30)`，防止 TCP 长连接 hang
+- 大批量下载（500+ 只股票）应使用 `nohup` 后台运行，不要使用 Claude Code 的 `run_in_background`
+
+## Pitfalls（已踩坑记录）
+
+- BaoStock 底层使用 TCP 长连接（非 HTTP），`send_msg()` 的 `recv()` 无超时保护，长时间运行后 TCP 半开连接会导致无限 hang。**必须在 login 前设置 `socket.setdefaulttimeout(30)`**，确保所有 socket 操作有超时
+- BaoStock 使用全局 session（`baostock.common.context.default_socket`），进程被 kill 后 TCP 连接残留，新进程可能复用坏连接。**务必先 `bs.logout()` 清理再重启**
+- Claude Code 的 `run_in_background` 与 BaoStock 长连接存在 I/O 冲突，大批量下载应使用 `nohup` 后台运行
+- exrights 数据缺失会导致前复权因子全部为默认值（adj_a=1, adj_b=0），回测使用未复权价格。**数据完整性检查应包含 exrights 文件数验证**
 
 ## Out of Scope
+
 - 不自动推送到远程仓库
